@@ -11,6 +11,9 @@ export type Env = {
   SHOP_ID?: string;
   /** Admin API token for the newsletter and contact forms. Server only. */
   SHOPIFY_ADMIN_API_TOKEN?: string;
+  /** Dev Dashboard app credentials. Server only; used to renew 24-hour tokens. */
+  SHOPIFY_ADMIN_CLIENT_ID?: string;
+  SHOPIFY_ADMIN_CLIENT_SECRET?: string;
 };
 
 export const envContext = createContext<Env>();

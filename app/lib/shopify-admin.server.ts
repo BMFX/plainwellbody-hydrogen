@@ -1,8 +1,8 @@
 // Server-only Shopify Admin API access for the newsletter and contact forms.
 //
-// Needs a custom app in Shopify admin (Settings › Apps › Develop apps) with the
-// `read_customers` and `write_customers` Admin API scopes. Its Admin API access token goes
-// in SHOPIFY_ADMIN_API_TOKEN (.env locally, the storefront's environment on Oxygen).
+// Uses a Dev Dashboard app with read_customers/write_customers access. Set
+// SHOPIFY_ADMIN_CLIENT_ID and SHOPIFY_ADMIN_CLIENT_SECRET in .env and Oxygen;
+// tokens are renewed automatically. Legacy apps may use SHOPIFY_ADMIN_API_TOKEN.
 // The `.server` suffix keeps this module, and the token, out of the browser bundle.
 //
 // Operations validated against the Admin GraphQL schema, version 2026-10.
@@ -14,12 +14,50 @@ const NOTE_LIMIT = 5000;
 
 export class AdminNotConfiguredError extends Error {
   constructor() {
-    super("SHOPIFY_ADMIN_API_TOKEN is not set");
+    super("Shopify Admin API credentials are not set");
   }
 }
 
 export function isAdminConfigured(env: Env) {
-  return Boolean(env.SHOPIFY_ADMIN_API_TOKEN && env.PUBLIC_STORE_DOMAIN?.endsWith(".myshopify.com"));
+  return Boolean(
+    (env.SHOPIFY_ADMIN_API_TOKEN || (env.SHOPIFY_ADMIN_CLIENT_ID && env.SHOPIFY_ADMIN_CLIENT_SECRET)) &&
+      env.PUBLIC_STORE_DOMAIN?.endsWith(".myshopify.com"),
+  );
+}
+
+// Each server isolate caches its own short-lived token and renews before expiry.
+let adminTokenCache: { key: string; token: string; expiresAt: number } | null = null;
+let pendingAdminToken: { key: string; promise: Promise<string> } | null = null;
+
+async function getAdminAccessToken(env: Env): Promise<string> {
+  if (!isAdminConfigured(env)) throw new AdminNotConfiguredError();
+  if (!env.SHOPIFY_ADMIN_CLIENT_ID || !env.SHOPIFY_ADMIN_CLIENT_SECRET) return env.SHOPIFY_ADMIN_API_TOKEN!;
+  const key = JSON.stringify([env.PUBLIC_STORE_DOMAIN, env.SHOPIFY_ADMIN_CLIENT_ID, env.SHOPIFY_ADMIN_CLIENT_SECRET]);
+  if (adminTokenCache?.key === key && Date.now() < adminTokenCache.expiresAt - 60_000) return adminTokenCache.token;
+  if (pendingAdminToken?.key === key) return pendingAdminToken.promise;
+  const promise = (async () => {
+    const response = await fetch(`https://${env.PUBLIC_STORE_DOMAIN}/admin/oauth/access_token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: env.SHOPIFY_ADMIN_CLIENT_ID!,
+        client_secret: env.SHOPIFY_ADMIN_CLIENT_SECRET!,
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`Admin token request failed: ${response.status}`);
+    const data = (await response.json()) as { access_token?: string; expires_in?: number };
+    if (!data.access_token || !data.expires_in || data.expires_in <= 0) throw new Error("Invalid Admin token response");
+    adminTokenCache = { key, token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+    return data.access_token;
+  })();
+  pendingAdminToken = { key, promise };
+  try {
+    return await promise;
+  } finally {
+    if (pendingAdminToken?.promise === promise) pendingAdminToken = null;
+  }
 }
 
 type UserError = { field?: string[] | null; message: string };
@@ -30,7 +68,7 @@ async function adminGraphql<T>(env: Env, query: string, variables: Record<string
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-shopify-access-token": env.SHOPIFY_ADMIN_API_TOKEN!,
+      "x-shopify-access-token": await getAdminAccessToken(env),
     },
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
