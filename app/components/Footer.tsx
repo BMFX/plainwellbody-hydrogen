@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 
 import { mediaFile } from "~/components/Media";
+import { NewsletterForm } from "~/components/NewsletterForm";
 import { FOOTER_COLUMNS } from "~/lib/plainwell";
 
 export function Footer({ shopName }: { shopName: string }) {
@@ -8,11 +9,8 @@ export function Footer({ shopName }: { shopName: string }) {
     <footer className="bg-ink text-paper mt-auto">
       <div className="pw-gutter flex flex-col gap-16 pt-20 pb-8">
         <div className="grid grid-cols-2 gap-x-6 gap-y-10 lg:grid-cols-5">
-          <div className="col-span-2 flex max-w-[440px] flex-col gap-4">
-            <p className="pw-section-label font-normal">New essentials and everyday notes, now and then.</p>
-            <Link to="/pages/journal" className="pw-link self-start">
-              Read the journal
-            </Link>
+          <div className="col-span-2">
+            <NewsletterForm />
           </div>
           {FOOTER_COLUMNS.map((column) => (
             <nav key={column.title} aria-label={column.title} className="flex flex-col gap-1 text-[13px]">

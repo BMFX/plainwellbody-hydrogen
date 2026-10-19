@@ -1,5 +1,5 @@
-import { Cache, gql } from "@shopify/hydrogen";
 
+import { loadPolicies } from "~/lib/policies";
 import { storefrontClientContext } from "~/lib/storefront";
 import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop";
 
@@ -7,22 +7,6 @@ import type { Route } from "./+types/policy";
 
 export { RouteErrorBoundary as ErrorBoundary } from "~/components/ErrorPage";
 
-const POLICIES_QUERY = gql(`
-  query PlainwellPolicies {
-    shop {
-      privacyPolicy { ...Policy }
-      refundPolicy { ...Policy }
-      shippingPolicy { ...Policy }
-      termsOfService { ...Policy }
-      subscriptionPolicy { handle title body }
-    }
-  }
-  fragment Policy on ShopPolicy {
-    handle
-    title
-    body
-  }
-`);
 
 export function meta({ matches, data }: Route.MetaArgs) {
   return [{ title: formatPageTitle(data?.policy.title ?? "Policy", getShopNameFromRootMatch(matches[0])) }];
@@ -30,12 +14,11 @@ export function meta({ matches, data }: Route.MetaArgs) {
 
 // Shopify's legal policies (Settings › Policies), at their standard /policies/:handle URLs.
 export async function loader({ context, params }: Route.LoaderArgs) {
-  const { data, errors } = await context.get(storefrontClientContext).graphql(POLICIES_QUERY, { cache: Cache.long() });
-  if (errors?.length) {
-    console.error(`Policies query failed: ${errors.map((e) => e.message).join("; ")}`);
+  const shop = await loadPolicies(context.get(storefrontClientContext)).catch((error: Error) => {
+    console.error(error.message);
     throw new Response("Policies unavailable", { status: 500 });
-  }
-  const policy = Object.values(data?.shop ?? {}).find((p) => p && typeof p === "object" && "handle" in p && p.handle === params.handle);
+  });
+  const policy = Object.values(shop ?? {}).find((p) => p && typeof p === "object" && "handle" in p && p.handle === params.handle);
   if (!policy || typeof policy !== "object" || !("body" in policy)) throw new Response("Not Found", { status: 404 });
   return { policy };
 }

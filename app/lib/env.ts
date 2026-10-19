@@ -9,6 +9,8 @@ export type Env = {
   PUBLIC_CUSTOMER_ACCOUNT_API_CLIENT_ID?: string;
   SESSION_SECRET?: string;
   SHOP_ID?: string;
+  /** Admin API token for the newsletter and contact forms. Server only. */
+  SHOPIFY_ADMIN_API_TOKEN?: string;
 };
 
 export const envContext = createContext<Env>();

@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router";
+import { Form, Link, useNavigation } from "react-router";
+
+import { FormGuards } from "~/components/FormGuards";
 
 import { Media } from "~/components/Media";
 import { ProductGrid, type CardItem } from "~/components/ProductCard";
 import { RoutineBlock } from "~/components/RoutineBlock";
 import { shopifyImageUrl, shopifySrcSet } from "~/lib/images";
+import type { FormResult } from "~/lib/forms";
 import { FREE_SHIPPING_THRESHOLD } from "~/lib/plainwell";
+import type { PolicyLink } from "~/lib/policies";
 
 // Plainwell's editorial pages, from the approved refined designs on the Claude Design
 // canvas. The copy is the design copy; anything not yet written (ingredients, returns,
@@ -14,6 +18,13 @@ import { FREE_SHIPPING_THRESHOLD } from "~/lib/plainwell";
 export type ContentData = {
   /** Cards for the products a page features. */
   products: CardItem[];
+  /** Shopify's legal policies that exist (Settings › Policies). */
+  policies?: Record<"privacy" | "refund" | "shipping" | "terms", PolicyLink | null> | null;
+  /** The store's customer email (Settings › Store details), via the Admin API. */
+  contactEmail?: string | null;
+  /** Whether the contact form can save messages (Admin API token set). */
+  contactReady?: boolean;
+  contactResult?: FormResult<"name" | "email" | "message"> | null;
 };
 
 function SectionHead({ eyebrow, title, intro, children }: { eyebrow: string; title: ReactNode; intro?: string; children?: ReactNode }) {
@@ -374,7 +385,19 @@ function Faq() {
   );
 }
 
-function Contact() {
+const CONTACT_FIELDS = [
+  { id: "contact-name", name: "name", label: "Name", type: "text", autoComplete: "name" },
+  { id: "contact-email", name: "email", label: "Email", type: "email", autoComplete: "email" },
+] as const;
+
+function Contact({ data }: { data: ContentData }) {
+  const navigation = useNavigation();
+  const sending = navigation.state === "submitting" && navigation.formAction?.startsWith("/pages/contact");
+  const result = data.contactResult;
+  const errors = result && !result.ok ? result.errors : {};
+  const sent = result?.ok;
+  const fieldClass = "!border-ink !h-12 !border-0 !border-b !bg-transparent !px-0 !text-[15px] aria-[invalid=true]:!border-b-2";
+
   return (
     <>
       <SectionHead
@@ -404,49 +427,115 @@ function Contact() {
           </li>
           <li className="flex flex-col gap-1 pt-7">
             <span className="pw-eyebrow">Email</span>
-            <span className="text-muted">[Customer care email to confirm]</span>
+            {data.contactEmail ? (
+              <a href={`mailto:${data.contactEmail}`} className="pw-link self-start text-[15px]">
+                {data.contactEmail}
+              </a>
+            ) : (
+              <span className="text-muted">[Customer care email to confirm]</span>
+            )}
           </li>
         </ol>
-        {/* No message service is connected yet, so the form is shown but not sent. */}
-        <form className="pw-gutter flex max-w-[560px] flex-col gap-7 pt-12 pb-[72px]" aria-describedby="contact-form-status">
-          {[
-            ["contact-name", "Name", "text", "name"],
-            ["contact-email", "Email", "email", "email"],
-          ].map(([id, label, type, autoComplete]) => (
-            <div key={id} className="flex flex-col gap-1.5">
-              <label htmlFor={id} className="text-[13px] tracking-[0.02em]">
-                {label}
+        {sent ? (
+          <div className="pw-gutter flex max-w-[560px] flex-col items-start gap-4 pt-12 pb-[72px]" role="status">
+            <span className="pw-eyebrow">Message sent</span>
+            <p className="pw-title">Thank you. We’ll be in touch.</p>
+            <p className="pw-lead">We read every message and reply by email.</p>
+            <Link to="/collections/all" className="pw-link">
+              Back to the shelf
+            </Link>
+          </div>
+        ) : (
+          <Form method="post" preventScrollReset className="pw-gutter relative flex max-w-[560px] flex-col gap-7 pt-12 pb-[72px]" noValidate>
+            <FormGuards />
+            {CONTACT_FIELDS.map((field) => (
+              <div key={field.id} className="flex flex-col gap-1.5">
+                <label htmlFor={field.id} className="text-[13px] tracking-[0.02em]">
+                  {field.label}
+                </label>
+                <input
+                  id={field.id}
+                  name={field.name}
+                  type={field.type}
+                  autoComplete={field.autoComplete}
+                  required
+                  maxLength={field.name === "name" ? 100 : 254}
+                  aria-invalid={errors[field.name] ? true : undefined}
+                  aria-describedby={errors[field.name] ? `${field.id}-error` : undefined}
+                  className={fieldClass}
+                />
+                {errors[field.name] ? (
+                  <p id={`${field.id}-error`} className="text-[13px]" role="alert">
+                    {errors[field.name]}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="contact-message" className="text-[13px] tracking-[0.02em]">
+                Message
               </label>
-              <input
-                id={id}
-                type={type}
-                autoComplete={autoComplete}
-                disabled
-                className="!border-ink !h-12 !border-0 !border-b !bg-transparent !px-0 !text-[15px]"
+              <textarea
+                id="contact-message"
+                name="message"
+                rows={5}
+                required
+                maxLength={2000}
+                aria-invalid={errors.message ? true : undefined}
+                aria-describedby={errors.message ? "contact-message-error" : undefined}
+                className="!border-ink !border-0 !border-b !bg-transparent !px-0 !py-3 !text-[15px] aria-[invalid=true]:!border-b-2"
               />
+              {errors.message ? (
+                <p id="contact-message-error" className="text-[13px]" role="alert">
+                  {errors.message}
+                </p>
+              ) : null}
             </div>
-          ))}
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="contact-message" className="text-[13px] tracking-[0.02em]">
-              Message
-            </label>
-            <textarea id="contact-message" rows={5} disabled className="!border-ink !border-0 !border-b !bg-transparent !px-0 !py-3 !text-[15px]" />
-          </div>
-          <div className="flex flex-col items-start gap-3">
-            <button type="submit" disabled className="pw-btn pw-btn--primary">
-              Send message
-            </button>
-            <p id="contact-form-status" className="text-muted text-[13px]">
-              [Contact form delivery to confirm before launch]
-            </p>
-          </div>
-        </form>
+            <div className="flex flex-col items-start gap-3">
+              <button type="submit" disabled={sending} className="pw-btn pw-btn--primary">
+                {sending ? "Sending…" : "Send message"}
+              </button>
+              {errors.form ? (
+                <p className="text-[13px]" role="alert">
+                  {errors.form}
+                </p>
+              ) : null}
+              <p className="text-muted text-[13px]">
+                {data.contactReady ? (
+                  <>
+                    We use your details only to reply. See our{" "}
+                    <Link to="/policies/privacy-policy" className="underline underline-offset-2">
+                      privacy policy
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  "[Contact form delivery to connect before launch]"
+                )}
+              </p>
+            </div>
+          </Form>
+        )}
       </section>
     </>
   );
 }
 
-function ShippingReturns() {
+function PolicyNote({ policy, missing }: { policy?: PolicyLink | null; missing: string }) {
+  if (!policy) return <>{missing}</>;
+  return (
+    <>
+      Read the full{" "}
+      <Link to={`/policies/${policy.handle}`} className="pw-link">
+        {policy.title.toLowerCase()}
+      </Link>
+      .
+    </>
+  );
+}
+
+function ShippingReturns({ data }: { data: ContentData }) {
+  const policies = data.policies;
   return (
     <>
       <SectionHead
@@ -467,22 +556,36 @@ function ShippingReturns() {
             items={[
               {
                 title: "Shipping",
-                body: `Standard US shipping is complimentary on orders of $${FREE_SHIPPING_THRESHOLD} or more. Below $${FREE_SHIPPING_THRESHOLD}, standard US shipping is $8. Other delivery options and international rates are shown at checkout.`,
+                body: (
+                  <>
+                    Standard US shipping is complimentary on orders of ${FREE_SHIPPING_THRESHOLD} or more. Below $
+                    {FREE_SHIPPING_THRESHOLD}, standard US shipping is $8. Other delivery options and international rates
+                    are shown at checkout.
+                    {policies?.shipping ? (
+                      <>
+                        {" "}
+                        <PolicyNote policy={policies.shipping} missing="" />
+                      </>
+                    ) : null}
+                  </>
+                ),
               },
-              { title: "Returns", body: "[Returns window and eligibility to confirm before launch]" },
+              {
+                title: "Returns",
+                body: <PolicyNote policy={policies?.refund} missing="[Returns window and eligibility to confirm before launch]" />,
+              },
               {
                 title: "Privacy",
                 body: (
                   <>
-                    This is a fictional Plainwell demo storefront. Read the{" "}
-                    <Link to="/policies/privacy-policy" className="pw-link">
-                      privacy policy
-                    </Link>
-                    .
+                    This is a fictional Plainwell demo storefront. <PolicyNote policy={policies?.privacy} missing="" />
                   </>
                 ),
               },
-              { title: "Terms", body: "[Terms of service to confirm before a public launch]" },
+              {
+                title: "Terms",
+                body: <PolicyNote policy={policies?.terms} missing="[Terms of service to confirm before a public launch]" />,
+              },
             ]}
           />
           <div className="pt-7">
@@ -512,6 +615,8 @@ type ContentPage = {
   /** Meta description, used when the Shopify page has no SEO description. */
   description: string;
   products?: string[];
+  /** Load links to Shopify's policies. */
+  policies?: boolean;
 };
 
 export const CONTENT_PAGES: Record<string, ContentPage> = {
@@ -534,7 +639,8 @@ export const CONTENT_PAGES: Record<string, ContentPage> = {
   contact: { component: Contact, description: "Questions about products, scents or an order? Get in touch with Plainwell customer care." },
   "shipping-returns": {
     component: ShippingReturns,
+    policies: true,
     description: `Shipping, returns and the details behind your order. Complimentary US shipping on orders over $${FREE_SHIPPING_THRESHOLD}.`,
   },
-  terms: { component: Terms, description: "The terms that apply to orders from Plainwell Body Co." },
+  terms: { component: Terms, policies: true, description: "The terms that apply to orders from Plainwell Body Co." },
 };

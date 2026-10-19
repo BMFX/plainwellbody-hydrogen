@@ -10,6 +10,7 @@ export default [
   route("pages/routine", "routes/routine.tsx"),
   route("pages/:handle", "routes/page.tsx"),
   route("policies/:handle", "routes/policy.tsx"),
+  route("newsletter", "routes/newsletter.tsx"),
   route("account", "routes/account.tsx"),
   route("*", "routes/catchall.tsx"),
 ] satisfies RouteConfig;
