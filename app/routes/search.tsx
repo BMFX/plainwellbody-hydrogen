@@ -84,74 +84,50 @@ function BreadcrumbJsonLd({ origin }: { origin: string }) {
   return <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>;
 }
 
-function Breadcrumb() {
-  return (
-    <nav aria-label="Breadcrumb" className="mb-6">
-      <ol className="text-on-surface-secondary flex items-center gap-1.5 text-sm">
-        <li>
-          <Link
-            to="/"
-            className="hover:text-on-surface rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current motion-safe:transition-colors"
-          >
-            Home
-          </Link>
-        </li>
-        <li aria-hidden="true" className="text-on-surface-secondary">
-          /
-        </li>
-        <li>
-          <span aria-current="page" className="text-on-surface font-medium">
-            Search
-          </span>
-        </li>
-      </ol>
-    </nav>
-  );
-}
 
 const registerSearchForm = createPredictiveSearchFormRegister();
 
+const SUGGESTIONS = ["Citrus", "Cedar", "Unscented", "Hand balm", "Travel"];
+
 function SearchHeader({ term }: { term: string }) {
   return (
-    <div className="mb-8">
-      <h1 className="type-display text-on-surface mb-6">Search</h1>
-      <form
-        action="/search"
-        method="get"
-        role="search"
-        aria-label="Search"
-        className="mb-8 max-w-lg"
-      >
-        <label htmlFor="search-q" className="text-on-surface mb-1.5 block text-sm font-medium">
-          Search
+    <section className="pw-gutter flex flex-col gap-7 pt-14 pb-10 md:pt-[72px]">
+      <span className="pw-eyebrow">Search</span>
+      <h1 className="pw-h1">Find your everyday.</h1>
+      <form action="/search" method="get" role="search" aria-label="Search" className="border-ink flex max-w-[720px] items-center gap-4 border-b">
+        <label htmlFor="search-q" className="sr-only">
+          Search products
         </label>
-        <div className="relative">
-          <span
-            className="text-on-surface-secondary pointer-events-none absolute start-3 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center"
-            aria-hidden="true"
-          >
-            <img src="/icons/icon-search.svg" alt="" className="size-5" />
-          </span>
           <input
             key={term}
             {...registerSearchForm("query")}
             id="search-q"
             defaultValue={term}
-            placeholder="Search"
-            className="peer h-11 w-full ps-10 pe-14"
+            placeholder="Search products"
+            className="!h-16 min-w-0 flex-1 !border-0 !bg-transparent !px-0 text-[28px] tracking-[-0.015em] max-sm:text-[22px]"
           />
-          {term ? (
-            <Link
-              to="/search"
-              aria-label="Clear search"
-              className="text-on-surface-secondary hover:text-on-surface focus-visible:outline-accent min-h-touch-target min-w-touch-target absolute end-1 top-1/2 inline-flex -translate-y-1/2 cursor-pointer items-center justify-center rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-safe:transition-colors"
-            >
-              <img src="/icons/icon-x.svg" alt="" className="size-4" aria-hidden="true" />
-            </Link>
-          ) : null}
-        </div>
+        {term ? (
+          <Link to="/search" className="text-muted shrink-0 text-[13px] underline underline-offset-4">
+            Clear
+          </Link>
+        ) : null}
       </form>
-    </div>
+      <nav aria-label="Suggestions" className="flex flex-wrap gap-2">
+        {SUGGESTIONS.map((label) => {
+          const active = label.toLowerCase() === term.trim().toLowerCase();
+          return (
+            <Link
+              key={label}
+              to={`/search?q=${encodeURIComponent(label.toLowerCase())}`}
+              aria-current={active ? "true" : undefined}
+              className={`inline-flex h-10 items-center border px-4 text-[13px] ${active ? "border-ink" : "border-line hover:border-ink"}`}
+            >
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+    </section>
   );
 }
 
@@ -165,11 +141,12 @@ function ProductGrid({ products }: { products: readonly ProductNode[] }) {
 
 function NoResults({ term }: { term: string }) {
   return (
-    <div aria-live="polite">
-      <p className="type-body text-on-surface-secondary">No results for “{term}”</p>
-      <p className="text-on-surface-secondary mt-2 text-sm">
-        Check your spelling or try a more general term.
-      </p>
+    <div aria-live="polite" className="border-line flex flex-col items-center gap-3.5 border-y py-24 text-center">
+      <h2 className="pw-title">No matches for “{term}”.</h2>
+      <p className="text-muted">Try a product name or a scent family.</p>
+      <Link to="/collections/all" className="pw-link">
+        Explore your essentials
+      </Link>
     </div>
   );
 }
@@ -273,12 +250,13 @@ export default function SearchRoute({ loaderData }: Route.ComponentProps) {
         />
       ) : null}
       <main className="flex-1" id="main-content" tabIndex={-1}>
-        <div className="max-w-page px-margin mx-auto w-full py-8 md:py-12">
-          <BreadcrumbJsonLd origin={loaderData.origin} />
-          <Breadcrumb />
-          <SearchHeader term={loaderData.searchTerm} />
-          {loaderData.performed ? <SearchResults loaderData={loaderData} /> : null}
-        </div>
+        <BreadcrumbJsonLd origin={loaderData.origin} />
+        <SearchHeader term={loaderData.searchTerm} />
+        {loaderData.performed ? (
+          <div className="pw-gutter pb-28">
+            <SearchResults loaderData={loaderData} />
+          </div>
+        ) : null}
       </main>
     </CollectionProvider>
   );

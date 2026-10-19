@@ -20,6 +20,8 @@ import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop
 
 import type { Route } from "./+types/collection";
 
+export { RouteErrorBoundary as ErrorBoundary } from "~/components/ErrorPage";
+
 const BANNER_SIZES = "100vw";
 
 export function meta({ matches, data }: Route.MetaArgs) {

@@ -36,7 +36,7 @@ export function Footer({ shopName }: { shopName: string }) {
           />
           <p className="flex flex-wrap gap-x-3 gap-y-1">
             <span>© {new Date().getFullYear()} {shopName} · Demo storefront</span>
-            <Link to="/pages/privacy" className="pw-hover">
+            <Link to="/policies/privacy-policy" className="pw-hover">
               Privacy
             </Link>
             <Link to="/pages/terms" className="pw-hover">

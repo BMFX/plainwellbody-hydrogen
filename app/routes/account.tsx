@@ -48,8 +48,6 @@ const ACCOUNT_QUERY = gql(`
 
 const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
 
-const buttonClass =
-  "rounded-button focus-visible:outline-accent inline-flex h-11 items-center justify-center px-5 text-sm font-medium no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-safe:transition-[color,background-color,border-color,transform] motion-safe:active:scale-[0.97]";
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "Account · CORE" }];
@@ -88,34 +86,35 @@ export async function loader({ context, request }: Route.LoaderArgs) {
 
 export default function AccountRoute({ loaderData }: Route.ComponentProps) {
   return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      className="max-w-page px-margin mx-auto w-full flex-1 py-12"
-    >
-      <h1 className="type-display text-on-surface mb-8">Account</h1>
+    <main id="main-content" tabIndex={-1} className="flex-1">
+      <section className="pw-gutter border-line flex flex-col gap-4 border-b pt-14 pb-10 md:pt-[72px]">
+        <span className="pw-eyebrow">Account</span>
+        <h1 className="pw-h1">{loaderData.status === "signed-in" ? "Your everyday orders." : "Welcome back"}</h1>
+      </section>
+      <div className="pw-gutter pt-12 pb-28">
       {loaderData.status === "unavailable" ? <Unavailable /> : null}
       {loaderData.status === "signed-out" ? <SignIn loginFailed={loaderData.loginFailed} /> : null}
       {loaderData.status === "error" ? (
         <>
-          <p role="alert" className="border-border bg-surface-secondary rounded border p-4">
+          <p role="alert" className="border-line bg-shelf border p-4">
             {loaderData.message}
           </p>
           <LogoutForm />
         </>
       ) : null}
       {loaderData.status === "signed-in" ? <Customer customer={loaderData.customer} /> : null}
+      </div>
     </main>
   );
 }
 
 function Unavailable() {
   return (
-    <section className="border-border rounded border p-8" aria-labelledby="unavailable-heading">
-      <h2 id="unavailable-heading" className="type-heading-md text-on-surface mb-3">
+    <section className="border-line max-w-[620px] border p-8" aria-labelledby="unavailable-heading">
+      <h2 id="unavailable-heading" className="pw-section-label mb-3">
         Customer Accounts aren&apos;t set up
       </h2>
-      <p className="text-on-surface-secondary max-w-xl">
+      <p className="text-muted max-w-xl">
         Customer Accounts need a real store, <code>SHOP_ID</code>,{" "}
         <code>PUBLIC_CUSTOMER_ACCOUNT_API_CLIENT_ID</code>, <code>SESSION_SECRET</code>, and HTTPS
         (use <code>npm run dev:https</code> locally).
@@ -126,18 +125,18 @@ function Unavailable() {
 
 function SignIn({ loginFailed }: { loginFailed: boolean }) {
   return (
-    <section className="border-border rounded border p-8" aria-labelledby="sign-in-heading">
-      <h2 id="sign-in-heading" className="type-heading-md text-on-surface mb-3">
-        Sign in
+    <section className="flex max-w-[520px] flex-col items-start gap-5" aria-labelledby="sign-in-heading">
+      <h2 id="sign-in-heading" className="pw-section-label">
+        Sign in or create an account
       </h2>
-      <p className="text-on-surface-secondary mb-6 max-w-xl">Sign in to see your orders.</p>
+      <p className="pw-lead">See your orders in one place. We’ll email you a code; there’s no password to remember.</p>
       {loginFailed ? (
-        <p role="alert" className="border-border bg-surface-secondary mb-6 rounded border p-4">
+        <p role="alert" className="border-line bg-shelf border p-4">
           We couldn&apos;t sign you in. Try again.
         </p>
       ) : null}
       {/* A plain <a>: the OAuth redirect needs a full page navigation. */}
-      <a href="/account/login" className={`button-primary ${buttonClass}`}>
+      <a href="/account/login" className={"pw-btn pw-btn--primary"}>
         Sign in
       </a>
     </section>
@@ -148,7 +147,7 @@ function LogoutForm() {
   // A plain <form>: the logout redirect needs a full page navigation.
   return (
     <form method="post" action="/account/logout" className="mt-6">
-      <button type="submit" className={`button-outline cursor-pointer ${buttonClass}`}>
+      <button type="submit" className={"pw-btn pw-btn--secondary"}>
         Log out
       </button>
     </form>
@@ -163,11 +162,11 @@ function Customer({ customer }: { customer: Customer }) {
   return (
     <div className="grid gap-12 lg:grid-cols-[1fr_2fr]">
       <section aria-labelledby="profile-heading">
-        <h2 id="profile-heading" className="type-heading-md text-on-surface mb-3">
+        <h2 id="profile-heading" className="pw-section-label mb-3">
           {name || "Your account"}
         </h2>
         {customer.emailAddress?.emailAddress ? (
-          <p className="text-on-surface-secondary">{customer.emailAddress.emailAddress}</p>
+          <p className="text-muted">{customer.emailAddress.emailAddress}</p>
         ) : null}
         <LogoutForm />
       </section>
@@ -183,13 +182,13 @@ function Orders({ orders }: { orders: Customer["orders"] }) {
 
   return (
     <section aria-labelledby="orders-heading">
-      <h2 id="orders-heading" className="type-heading-md text-on-surface mb-4">
+      <h2 id="orders-heading" className="pw-section-label mb-4">
         Orders
       </h2>
       {orders.nodes.length === 0 ? (
         <div>
           <p className="text-on-surface font-medium">You haven&apos;t placed any orders yet.</p>
-          <Link to="/collections" className={`button-primary mt-6 ${buttonClass}`}>
+          <Link to="/collections" className={"pw-btn pw-btn--primary mt-6"}>
             Start shopping
           </Link>
         </div>
@@ -197,7 +196,7 @@ function Orders({ orders }: { orders: Customer["orders"] }) {
         <ul
           role="list"
           aria-busy={isPaging}
-          className={`divide-border divide-y ${isPaging ? "opacity-50" : ""}`}
+          className={`divide-line divide-y ${isPaging ? "opacity-50" : ""}`}
         >
           {orders.nodes.map((order) => (
             <li key={order.id} className="flex flex-wrap items-baseline gap-x-6 gap-y-1 py-4">
@@ -207,10 +206,10 @@ function Orders({ orders }: { orders: Customer["orders"] }) {
               >
                 Order {order.name}
               </a>
-              <time dateTime={order.processedAt} className="text-on-surface-secondary text-sm">
+              <time dateTime={order.processedAt} className="text-muted text-sm">
                 {dateFormat.format(new Date(order.processedAt))}
               </time>
-              <span className="text-on-surface-secondary text-sm">
+              <span className="text-muted text-sm">
                 {formatStatus(order.financialStatus)}
               </span>
               <span className="text-on-surface ms-auto font-medium">
@@ -226,7 +225,7 @@ function Orders({ orders }: { orders: Customer["orders"] }) {
             <Link
               to={`?before=${encodeURIComponent(pageInfo.startCursor)}`}
               preventScrollReset
-              className={`button-outline ${buttonClass}`}
+              className={"pw-btn pw-btn--secondary"}
             >
               Newer orders
             </Link>
@@ -237,7 +236,7 @@ function Orders({ orders }: { orders: Customer["orders"] }) {
             <Link
               to={`?after=${encodeURIComponent(pageInfo.endCursor)}`}
               preventScrollReset
-              className={`button-outline ${buttonClass}`}
+              className={"pw-btn pw-btn--secondary"}
             >
               Older orders
             </Link>

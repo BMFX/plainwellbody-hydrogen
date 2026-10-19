@@ -1,10 +1,11 @@
-import { ShopPayButton } from "@shopify/hydrogen/react";
 import { useEffect, useMemo, useState, type SubmitEvent } from "react";
 import { Link } from "react-router";
 
 import { useCart, useCartForm } from "~/lib/cart";
 import { closeCartDrawer, configureOpenCartAction, CART_DRAWER_ID } from "~/lib/cart-drawer";
+import { shopifyImageUrl, shopifySrcSet } from "~/lib/images";
 import { formatPrice } from "~/lib/money";
+import { shippingNote } from "~/lib/shipping";
 
 import { publishCartViewed } from "./AnalyticsTrackers";
 
@@ -19,7 +20,7 @@ function CartErrorBanner() {
   if (messages.length === 0 || errors.lastUpdatedAt <= dismissedAt) return null;
 
   return (
-    <div className="border-border bg-surface-secondary mx-4 mb-2 rounded p-3 text-sm" role="alert">
+    <div className="border-line bg-shelf mx-5 mt-4 border p-3 text-sm sm:mx-8" role="alert">
       <div className="flex items-start justify-between gap-3">
         <div className="grid gap-1">
           {messages.map((message) => (
@@ -116,89 +117,94 @@ export function CartLineItem({
     target?.focus();
   };
 
+  const title = product?.title ?? merchandise?.title ?? "Product";
+  const size = merchandise?.selectedOptions?.find((option) => option.name === "Size")?.value ?? optionText;
+
   return (
     <li
-      className={`flex gap-3 py-4 transition-opacity ${pending ? "opacity-60" : ""}`}
+      className={`border-line grid grid-cols-[80px_1fr_auto] items-start gap-x-4 gap-y-3 border-b py-6 transition-opacity sm:grid-cols-[96px_1fr_auto] sm:gap-x-5 ${pending ? "opacity-60" : ""}`}
       data-testid="cart-line"
       {...(pending ? { "aria-busy": "true" } : {})}
     >
-      <div className="bg-surface-secondary size-20 shrink-0 overflow-hidden">
+      <div className="bg-shelf aspect-[4/5] overflow-hidden">
         {merchandise?.image ? (
           <img
-            src={merchandise.image.url}
-            alt={merchandise.image.altText ?? product?.title ?? merchandise.title ?? ""}
+            src={shopifyImageUrl(merchandise.image.url, 200)}
+            srcSet={shopifySrcSet(merchandise.image.url, [200, 300])}
+            sizes="96px"
+            alt=""
+            width={96}
+            height={120}
             className="h-full w-full object-cover"
             loading="lazy"
           />
         ) : null}
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="type-body-sm text-on-surface font-medium">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="font-medium">
           {product?.handle ? (
-            <Link to={`/products/${product.handle}`} className="text-on-surface no-underline">
-              {product.title ?? merchandise?.title ?? "Product"}
+            <Link to={`/products/${product.handle}`} className="pw-hover">
+              {title}
             </Link>
           ) : (
-            (product?.title ?? merchandise?.title ?? "Product")
+            title
           )}
         </p>
-        {optionText ? <p className="text-on-surface-secondary mt-1 text-xs">{optionText}</p> : null}
+        {size ? <p className="text-muted">{size}</p> : null}
         {line.attributes
           ?.filter((attr) => !attr.key.startsWith("_") && attr.value != null)
           .map((attr) => (
-            <p key={attr.key} className="text-on-surface-secondary mt-1 text-xs italic">
+            <p key={attr.key} className="text-muted text-xs">
               {attr.key}: {attr.value}
             </p>
           ))}
-        <p className={`text-on-surface mt-2 text-sm ${pending ? "opacity-50" : ""}`}>
-          {formatPrice(line.cost.totalAmount)}
-        </p>
         <form
           {...formProps({ beforeSubmit: moveFocusBeforeRemoval })}
-          className="mt-3 flex items-center gap-2"
+          className="mt-3.5 flex items-center gap-5"
         >
           <button {...register("set")} />
           <input type="hidden" {...register("lineId", { value: line.id })} />
-          <div className="quantity-selector-outlined rounded-input inline-flex items-center">
+          <div className="border-line inline-flex h-11 items-center border">
             <button
               type="submit"
               {...register("decrease")}
-              className="text-on-surface-secondary hover:text-on-surface inline-flex size-11 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50 motion-safe:transition-[color,transform] motion-safe:active:scale-[0.90]"
-              aria-label={`Decrease quantity for ${product?.title ?? merchandise?.title ?? "item"}`}
+              className="inline-flex h-full w-10 items-center justify-center text-base"
+              aria-label={`Decrease quantity for ${title}`}
             >
-              <img src="/icons/icon-minus.svg" alt="" className="size-4" aria-hidden="true" />
+              −
             </button>
             <input
               {...register("quantity", { value: line.quantity, interactive: true })}
-              className={`number-reset text-on-surface h-11 w-12 rounded-none border-0 bg-transparent p-0 text-center text-sm ${pending ? "opacity-50" : ""}`}
-              aria-label="Quantity"
+              className={`number-reset !h-full !w-9 !border-0 !bg-transparent !p-0 text-center !text-sm ${pending ? "opacity-50" : ""}`}
+              aria-label={`Quantity for ${title}`}
               aria-describedby={lineError?.userErrors.length ? errorId : undefined}
               aria-invalid={lineError?.userErrors.length ? true : undefined}
             />
             <button
               type="submit"
               {...register("increase")}
-              className="text-on-surface-secondary hover:text-on-surface inline-flex size-11 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50 motion-safe:transition-[color,transform] motion-safe:active:scale-[0.90]"
-              aria-label={`Increase quantity for ${product?.title ?? merchandise?.title ?? "item"}`}
+              className="inline-flex h-full w-10 items-center justify-center text-base"
+              aria-label={`Increase quantity for ${title}`}
             >
-              <img src="/icons/icon-plus.svg" alt="" className="size-4" aria-hidden="true" />
+              +
             </button>
           </div>
           <button
             type="submit"
             {...register("remove")}
-            className="text-on-surface-secondary hover:text-on-surface inline-flex size-11 items-center justify-center rounded motion-safe:transition-[color,transform] motion-safe:active:scale-[0.90]"
-            aria-label={`Remove ${product?.title ?? merchandise?.title ?? "item"}`}
+            className="text-muted hover:text-ink inline-flex h-11 items-center text-[13px] underline underline-offset-[3px]"
+            aria-label={`Remove ${title}`}
           >
-            <img src="/icons/icon-trash.svg" alt="" className="size-5" aria-hidden="true" />
+            Remove
           </button>
         </form>
         {lineError?.userErrors.length ? (
-          <p id={errorId} className="text-critical mt-2 text-sm" role="alert">
+          <p id={errorId} className="mt-2 text-sm" role="alert">
             {lineError.userErrors[0]?.message}
           </p>
         ) : null}
       </div>
+      <p className={`text-right ${pending ? "opacity-50" : ""}`}>{formatPrice(line.cost.totalAmount)}</p>
     </li>
   );
 }
@@ -208,22 +214,22 @@ function CartLines() {
   const lines = useCart((state) => state.data.lines.nodes);
 
   if (loading) {
-    return <p className="text-on-surface-secondary type-body-sm">Loading cart…</p>;
+    return <p className="text-muted">Loading your bag…</p>;
   }
 
   if (lines.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center text-center">
-        <p className="text-on-surface font-medium">Your bag is empty.</p>
-        <p className="text-on-surface-secondary mt-2 text-sm">
-          Looks like you haven&apos;t added anything to your cart yet.
-        </p>
+      <div className="flex h-full flex-col items-start justify-center gap-5">
+        <p className="pw-heading">Your bag is empty.</p>
+        <Link to="/collections/all" className="pw-btn pw-btn--primary" onClick={() => closeCartDrawer()}>
+          Shop all essentials
+        </Link>
       </div>
     );
   }
 
   return (
-    <ul role="list" className="divide-border -mt-4 divide-y">
+    <ul role="list" className="border-line border-t">
       {lines.map((line) => (
         <CartLineItem key={line.id} line={line} emptyCartFocusId="cart-drawer-title" />
       ))}
@@ -241,33 +247,28 @@ function CartFooter() {
   if (!hasLines) return null;
 
   return (
-    <div className="border-border shrink-0 border-t p-4">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between" aria-busy={isPending}>
-          <span className="text-on-surface text-sm font-medium">
-            Estimated total
-            {isPending ? <span aria-hidden="true"> (updating)</span> : null}
+    <div className="border-line shrink-0 border-t px-5 pt-4 pb-6 sm:px-8">
+      <div className="flex flex-col">
+        <div className="flex items-baseline justify-between py-3" aria-busy={isPending}>
+          <span>
+            Subtotal
+            {isPending ? <span className="text-muted"> (updating)</span> : null}
           </span>
-          <span
-            className={`text-on-surface text-base font-medium ${isPending ? "text-on-surface-secondary" : ""}`}
-          >
-            {formatPrice(cart.cost.totalAmount)}
+          <span className={`text-xl tracking-[-0.01em] ${isPending ? "opacity-50" : ""}`}>
+            {formatPrice(cart.cost.subtotalAmount)}
           </span>
         </div>
-        <p className="text-on-surface-secondary text-xs">
-          Taxes and shipping calculated at checkout
+        <p className={`text-muted pb-4 text-[13px] ${isPending ? "opacity-50" : ""}`}>
+          {shippingNote(cart.cost.subtotalAmount)} Taxes calculated at checkout.
         </p>
         {cart.checkoutUrl ? (
-          <>
-            <ShopPayButton width="100%" borderRadius="8px" />
-            <a
-              href={cart.checkoutUrl}
-              className="rounded-button button-primary focus-visible:outline-accent inline-flex h-11 w-full items-center justify-center gap-2 px-4 text-sm font-medium no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-safe:transition-[color,background-color,border-color,transform] motion-safe:active:scale-[0.97]"
-            >
-              Checkout
-            </a>
-          </>
+          <a href={cart.checkoutUrl} className="pw-btn pw-btn--primary w-full">
+            Check out
+          </a>
         ) : null}
+        <Link to="/cart" className="pw-link mt-4 self-center" onClick={() => closeCartDrawer()}>
+          View bag
+        </Link>
       </div>
     </div>
   );
@@ -302,28 +303,26 @@ export function CartDrawer() {
       </span>
       <dialog
         id={CART_DRAWER_ID}
-        className="drawer-right bg-surface text-on-surface"
+        className="drawer-right bg-paper text-ink"
         aria-labelledby="cart-drawer-title"
         data-testid="cart-drawer"
         closedby="any"
       >
         <div className="flex h-full flex-col">
-          <div className="flex shrink-0 items-center py-2 ps-4">
-            <div className="flex flex-1 items-center gap-2">
-              <h2
-                id="cart-drawer-title"
-                tabIndex={-1}
-                className="text-on-surface text-lg font-medium"
-              >
+          <div className="border-line flex h-16 shrink-0 items-center border-b ps-5 pe-2 sm:ps-8">
+            <div className="flex flex-1 items-baseline gap-3">
+              <h2 id="cart-drawer-title" tabIndex={-1} className="pw-section-label">
                 Your bag
               </h2>
-              <span className="cart-count-badge">{totalQuantity}</span>
+              <span className="text-muted text-[13px]">
+                {totalQuantity} {totalQuantity === 1 ? "item" : "items"}
+              </span>
             </div>
             <button
               type="button"
               commandfor={CART_DRAWER_ID}
               command="close"
-              className="button-icon focus-visible:outline-accent inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-safe:transition-[color,background-color,border-color,transform] motion-safe:active:scale-[0.97]"
+              className="button-icon"
               aria-label="Close"
               onClick={() => closeCartDrawer()}
             >
@@ -331,7 +330,7 @@ export function CartDrawer() {
             </button>
           </div>
           <CartErrorBanner />
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto px-5 sm:px-8">
             <CartLines />
           </div>
           <CartFooter />

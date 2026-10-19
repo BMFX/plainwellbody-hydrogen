@@ -2,7 +2,6 @@ import { handleShopifyRedirects, handleShopifyRoutes } from "@shopify/hydrogen";
 import { ShopifyScripts } from "@shopify/hydrogen/react";
 import type { ReactNode } from "react";
 import {
-  isRouteErrorResponse,
   Links,
   Meta,
   Outlet,
@@ -16,6 +15,7 @@ import { CartAnalyticsTracker, PageViewedTracker } from "~/components/AnalyticsT
 import { AnnouncementBar } from "~/components/AnnouncementBar";
 import { CartDrawer } from "~/components/CartDrawer";
 import { Footer } from "~/components/Footer";
+import { ErrorPage } from "~/components/ErrorPage";
 import { Header } from "~/components/Header";
 import { SearchDrawer } from "~/components/SearchDrawer";
 import { CartProvider } from "~/lib/cart";
@@ -165,32 +165,5 @@ export default function App({ loaderData }: Route.ComponentProps) {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = "Oops!";
-  let details = "An unexpected error occurred.";
-  let stack: string | undefined;
-
-  if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? "404" : "Error";
-    details =
-      error.status === 404 ? "The requested page could not be found." : error.statusText || details;
-  } else if (import.meta.env.DEV && error && error instanceof Error) {
-    details = error.message;
-    stack = error.stack;
-  }
-
-  return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      className="max-w-page px-margin mx-auto w-full flex-1 py-12"
-    >
-      <h1 className="type-display text-on-surface">{message}</h1>
-      <p className="text-on-surface-secondary mt-4">{details}</p>
-      {stack ? (
-        <pre className="border-border mt-6 w-full overflow-x-auto rounded border p-4 text-sm">
-          <code>{stack}</code>
-        </pre>
-      ) : null}
-    </main>
-  );
+  return <ErrorPage error={error} />;
 }

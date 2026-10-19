@@ -37,6 +37,8 @@ import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop
 
 import type { Route } from "./+types/product";
 
+export { RouteErrorBoundary as ErrorBoundary } from "~/components/ErrorPage";
+
 const PRODUCT_VARIANT_FRAGMENT = gql(`
   fragment ProductVariantFields on ProductVariant {
     id
