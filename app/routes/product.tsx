@@ -31,6 +31,7 @@ import {
 } from "~/lib/plainwell";
 import { loadCatalog } from "~/lib/plainwell-catalog";
 import { ProductProvider, useProductForm } from "~/lib/product";
+import { inventoryHintText, loadProductInventory } from "~/lib/product-inventory";
 import { storefrontClientContext } from "~/lib/storefront";
 import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop";
 
@@ -184,12 +185,13 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
   const storefrontClient = context.get(storefrontClientContext);
   const url = new URL(request.url);
   const selectedOptions = getSelectedProductOptions({ searchParams: url.searchParams });
-  const [productResult, catalog] = await Promise.all([
+  const [productResult, catalog, inventory] = await Promise.all([
     storefrontClient.graphql(PRODUCT_QUERY, {
       variables: { handle, selectedOptions },
       cache: Cache.short(),
     }),
     loadCatalog(storefrontClient),
+    loadProductInventory(storefrontClient, handle, selectedOptions),
   ]);
 
   if (productResult.errors?.length) {
@@ -223,7 +225,7 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
 
   const common = { handle, scent, family, siblings, pairs, origin: url.origin };
   if (product) {
-    return { kind: "live" as const, product, category: categoryOf(product.tags, product.productType), ...common };
+    return { kind: "live" as const, product, inventory, category: categoryOf(product.tags, product.productType), ...common };
   }
   return { kind: "concept" as const, concept: concept!, category: concept!.category, ...common };
 }
@@ -393,13 +395,18 @@ function PriceBlock({ product, selectedVariant }: { product: ProductData; select
   );
 }
 
-// Low-stock counts need the `unauthenticated_read_product_inventory` scope, which this
-// storefront does not request, so only the sold-out state is shown.
-function InventoryHint({ selectedVariant }: { selectedVariant: ProductVariant | null }) {
-  if (!selectedVariant || selectedVariant.availableForSale) return null;
+function InventoryHint({
+  selectedVariant,
+  inventory,
+}: {
+  selectedVariant: ProductVariant | null;
+  inventory: Record<string, number>;
+}) {
+  const text = inventoryHintText(selectedVariant, inventory);
+  if (!text) return null;
   return (
-    <p className="text-sm" data-product-inventory>
-      Out of stock
+    <p className="text-sm" data-product-inventory aria-live="polite">
+      {text}
     </p>
   );
 }
@@ -695,7 +702,7 @@ function LiveInfo({ data }: { data: LiveData }) {
         </div>
       )}
       <PriceBlock product={product} selectedVariant={selectedVariant} />
-      <InventoryHint selectedVariant={selectedVariant} />
+      <InventoryHint selectedVariant={selectedVariant} inventory={data.inventory} />
       <div data-product-form className="flex flex-col gap-3">
         <span className="sr-only" aria-live="polite" data-add-to-cart-status />
         <AddToCart product={product} selectedVariant={selectedVariant} />
