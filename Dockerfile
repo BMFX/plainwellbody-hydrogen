@@ -7,6 +7,7 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 FROM node:24-bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production PORT=3000 TRUST_PROXY=true
 WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./
