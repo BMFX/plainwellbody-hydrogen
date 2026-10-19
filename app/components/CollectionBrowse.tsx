@@ -659,7 +659,7 @@ export function FilterDrawer({
             aria-label="Close"
             onClick={() => closeDialog(id)}
           >
-            <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" />
+            <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" loading="lazy" />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">

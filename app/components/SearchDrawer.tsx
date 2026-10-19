@@ -98,7 +98,7 @@ function SearchDialog() {
             aria-label="Close"
             onClick={() => closeSearchDrawer()}
           >
-            <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" />
+            <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" loading="lazy" />
           </button>
         </div>
         <SearchSuggestions />

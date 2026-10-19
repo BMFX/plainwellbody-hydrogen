@@ -1,5 +1,5 @@
 /*
-  Storefront Kit examples core tokens.
+  Storefront Kit core tokens, rebranded for Plainwell Body Co.
   Derived once from ose-next-theme/config/styles.css for the five-page storefront
   (product, collection, collections list, search, home), the shared chrome, and the
   consent banner. Intentionally excludes the source-scanning directives from the
@@ -9,11 +9,24 @@
 
 @theme {
   /* Surfaces */
-  --color-surface: #ffffff;
-  --color-surface-secondary: #e3e3e3;
-  --color-on-surface: #000000;
-  --color-on-surface-secondary: #6b7280;
-  --color-border: #e5e7eb;
+  --color-surface: #f6f4ef;
+  --color-surface-secondary: #f4f1eb;
+  --color-on-surface: #1d1d1b;
+  --color-on-surface-secondary: #66625a;
+  --color-border: #ddd8ce;
+
+  /* Plainwell Body Co. v2 (refined): the design system's tokens.json, by name.
+     https://claude.ai/artifact/LziZqjbZbYDJTGyNmZJ3mN */
+  --color-paper: #f6f4ef;
+  --color-shelf: #f4f1eb;
+  --color-line: #ddd8ce;
+  --color-ink: #1d1d1b;
+  --color-muted: #66625a;
+  --color-olive: #2b3127;
+  --color-on-olive: #d8d4ca;
+  --color-on-ink-muted: #a8a49b;
+  --color-rule-on-ink: #3a3a36;
+  --color-white: #ffffff;
 
   /* ─── Brand: the single source of truth ────────────────────────────────
      Change THIS one value to recolor the entire storefront. Every interactive
@@ -23,20 +36,20 @@
      shades, and relative-color oklch() for the softer accent tint. Nothing
      hard-codes the burgundy a second time, so the whole UI re-harmonizes from
      this one knob. */
-  --color-primary: #5d0707;
+  --color-primary: #1d1d1b;
 
   /* Interactive — derived from --color-primary.
      -hover and -active are the brand darkened one and two steps in oklab; this
      is the ONLY place the pressed/hover brand shades are defined. */
   --color-interactive: var(--color-primary);
-  --color-interactive-hover: color-mix(in oklab, var(--color-primary) 85%, black);
-  --color-interactive-active: color-mix(in oklab, var(--color-primary) 72%, black);
+  --color-interactive-hover: color-mix(in oklab, var(--color-primary) 82%, white);
+  --color-interactive-active: #000000;
   --color-interactive-text: #ffffff;
 
   /* Accent — a lighter, desaturated tint of the brand, used for focus rings
      and the accent badge. Relative-color oklch: lift lightness, cut chroma to
      ~40%, ease the hue a touch. Tracks --color-primary automatically. */
-  --color-accent: oklch(from var(--color-primary) calc(l + 0.17) calc(c * 0.39) calc(h - 9));
+  --color-accent: var(--color-ink);
 
   /* Button variants — every brand button maps onto the interactive ramp, so
      they share one hover/active definition rather than re-deriving shades. */
@@ -75,17 +88,19 @@
   --color-hover: rgb(0 0 0 / 0.03);
 
   /* Radius */
-  --radius-sm: 0.25rem;
-  --radius: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-button: 0.5rem;
+  /* Everything is square (radius-none). */
+  --radius-sm: 0;
+  --radius: 0;
+  --radius-lg: 0;
+  --radius-button: 0;
   --radius-card: 0;
-  --radius-input: 0.5rem;
-  --radius-badge: 9999px;
+  --radius-input: 0;
+  --radius-badge: 0;
 
-  /* Typography: locked to system-ui for examples. */
-  --font-body: system-ui, -apple-system, sans-serif;
-  --font-heading: system-ui, -apple-system, sans-serif;
+  /* Typography: Instrument Sans only, self-hosted (see app.css). */
+  --font-sans: "Instrument Sans Variable", "Helvetica Neue", Arial, sans-serif;
+  --font-body: var(--font-sans);
+  --font-heading: var(--font-sans);
 
   /* Easing */
   --ease-ui: cubic-bezier(0.16, 1, 0.3, 1);
@@ -93,8 +108,11 @@
 
   /* Layout spacing */
   --spacing-page: 80rem;
-  --spacing-margin: 1rem;
-  --spacing-control-height: 2.125rem;
+  --spacing-margin: 1.25rem;
+  --spacing-gutter: clamp(20px, 3.5vw, 48px);
+  --spacing-section: 112px;
+  --spacing-control-height: 3rem;
+  --spacing-header: 84px;
   --spacing-touch-target: 2.75rem;
   /* Visible facet indicator sizes. These are the painted box/chip; the 44px
      touch target is owned by the wrapping clickable label (min-h/min-w-touch-target),
@@ -121,7 +139,8 @@
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --shadow-xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  /* No shadows in the brand: the drawer sits on its backdrop. */
+  --shadow-xl: none;
 
   /* Aspect ratios */
   --aspect-portrait: 4/5;
@@ -234,7 +253,7 @@
 
   @media (min-width: 48rem) {
     :root {
-      --spacing-margin: 2.5rem;
+      --spacing-margin: 3rem;
     }
   }
 }

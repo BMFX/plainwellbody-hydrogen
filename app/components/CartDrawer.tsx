@@ -214,7 +214,7 @@ function CartLines() {
   if (lines.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center text-center">
-        <p className="text-on-surface font-medium">Your cart is empty.</p>
+        <p className="text-on-surface font-medium">Your bag is empty.</p>
         <p className="text-on-surface-secondary mt-2 text-sm">
           Looks like you haven&apos;t added anything to your cart yet.
         </p>
@@ -315,7 +315,7 @@ export function CartDrawer() {
                 tabIndex={-1}
                 className="text-on-surface text-lg font-medium"
               >
-                Cart
+                Your bag
               </h2>
               <span className="cart-count-badge">{totalQuantity}</span>
             </div>
@@ -327,7 +327,7 @@ export function CartDrawer() {
               aria-label="Close"
               onClick={() => closeCartDrawer()}
             >
-              <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" />
+              <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" loading="lazy" />
             </button>
           </div>
           <CartErrorBanner />

@@ -1,30 +1,10 @@
-import type { ReactElement } from "react";
+import { FREE_SHIPPING_THRESHOLD } from "~/lib/plainwell";
 
-interface Announcement {
-  content: ReactElement;
-}
-
-// Add announcements as JSX elements here.
-const ANNOUNCEMENTS: Announcement[] = [];
-
+// Keep in sync with the store's shipping profile: US standard is free at $50 and up.
 export function AnnouncementBar() {
-  if (ANNOUNCEMENTS.length === 0) return null;
-
   return (
-    <div
-      role="region"
-      aria-label="Announcement"
-      className="bg-on-surface px-margin py-2.5 text-center"
-    >
-      <ul role="list">
-        {ANNOUNCEMENTS.map((announcement, index) => (
-          <AnnouncementBarItem key={index} {...announcement} />
-        ))}
-      </ul>
+    <div role="region" aria-label="Announcement" className="bg-ink px-5 py-2.5 text-center text-xs tracking-[0.04em] text-white">
+      Complimentary US shipping on orders over ${FREE_SHIPPING_THRESHOLD}.
     </div>
   );
-}
-
-function AnnouncementBarItem({ content }: Announcement) {
-  return <li className="type-body-sm text-surface wrap-anywhere">{content}</li>;
 }

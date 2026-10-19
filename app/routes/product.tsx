@@ -1,18 +1,35 @@
 import {
   AnalyticsEvent,
   buildProductSelectionSearchParams,
+  Cache,
   canAddToCart,
   getSelectedProductOptions,
   gql,
   type SelectedOption,
 } from "@shopify/hydrogen";
-import { ShopPayButton } from "@shopify/hydrogen/react";
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 
-import { ProductCard, PRODUCT_CARD_FRAGMENT } from "~/components/ProductCard";
+import { Media, mediaPreload } from "~/components/Media";
+import { ProductGrid, type CardItem } from "~/components/ProductCard";
 import { openCartDrawer } from "~/lib/cart-drawer";
-import { formatPrice, salePercent } from "~/lib/money";
+import { shopifyImageUrl, shopifySrcSet } from "~/lib/images";
+import { formatPrice, salePercent, wholePrice } from "~/lib/money";
+import {
+  CATEGORY_LABEL,
+  categoryOf,
+  familyOf,
+  findConcept,
+  FREE_SHIPPING_THRESHOLD,
+  ritualFor,
+  SCENT_LABEL,
+  SCENT_NOTE,
+  SCENT_ORDER,
+  scentOf,
+  type ConceptProduct,
+  type Scent,
+} from "~/lib/plainwell";
+import { loadCatalog } from "~/lib/plainwell-catalog";
 import { ProductProvider, useProductForm } from "~/lib/product";
 import { storefrontClientContext } from "~/lib/storefront";
 import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop";
@@ -24,7 +41,6 @@ const PRODUCT_VARIANT_FRAGMENT = gql(`
     id
     title
     availableForSale
-    quantityAvailable
     selectedOptions {
       name
       value
@@ -52,6 +68,7 @@ const PRODUCT_VARIANT_FRAGMENT = gql(`
   }
 `);
 
+
 const PRODUCT_QUERY = gql(
   `
     query ProductPage($handle: String!, $selectedOptions: [SelectedOptionInput!]!) {
@@ -61,7 +78,8 @@ const PRODUCT_QUERY = gql(
         title
         vendor
         description
-        descriptionHtml
+        productType
+        tags
         requiresSellingPlan
         encodedVariantExistence
         encodedVariantAvailability
@@ -72,14 +90,9 @@ const PRODUCT_QUERY = gql(
           width
           height
         }
-        images(first: 8) {
-          nodes {
-            id
-            url
-            altText
-            width
-            height
-          }
+        seo {
+          title
+          description
         }
         priceRange {
           minVariantPrice {
@@ -123,24 +136,44 @@ const PRODUCT_QUERY = gql(
           ...ProductVariantFields
         }
       }
-      products(first: 5) {
-        nodes {
-          ...ProductCard
-        }
-      }
     }
   `,
-  [PRODUCT_VARIANT_FRAGMENT, PRODUCT_CARD_FRAGMENT],
+  [PRODUCT_VARIANT_FRAGMENT],
 );
 
-export function meta({ matches }: Route.MetaArgs) {
+export function meta({ matches, data }: Route.MetaArgs) {
   const shopName = getShopNameFromRootMatch(matches[0]);
+  if (!data) return [{ title: formatPageTitle("Product", shopName) }];
+  const { title, description, image } =
+    data.kind === "live"
+      ? {
+          title: data.product.seo.title || data.product.title,
+          description: data.product.seo.description || data.product.description,
+          image: data.product.featuredImage?.url,
+        }
+      : { title: data.concept.title, description: `${data.concept.title} is coming soon to Plainwell.`, image: undefined };
   return [
-    { title: formatPageTitle("Product", shopName) },
-    {
-      name: "description",
-      content: `Shop the ${shopName} product detail page.`,
-    },
+    { title: formatPageTitle(title, shopName) },
+    { name: "description", content: description },
+    { tagName: "link", rel: "canonical", href: `${data.origin}/products/${data.handle}` },
+    { property: "og:type", content: "product" },
+    { property: "og:title", content: title },
+    { property: "og:description", content: description },
+    ...(image
+      ? [
+          { property: "og:image", content: shopifyImageUrl(image, 1200) },
+          // The packshot is the LCP image: start it with the document.
+          {
+            tagName: "link",
+            rel: "preload",
+            as: "image",
+            href: shopifyImageUrl(image, 900),
+            imageSrcSet: shopifySrcSet(image, GALLERY_WIDTHS),
+            imageSizes: GALLERY_SIZES,
+            fetchPriority: "high",
+          },
+        ]
+      : [{ tagName: "link", ...mediaPreload(`pack-${data.handle}`, GALLERY_SIZES) }]),
   ];
 }
 
@@ -149,34 +182,59 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
   if (!handle) throw new Response("Not Found", { status: 404 });
 
   const storefrontClient = context.get(storefrontClientContext);
-  const selectedOptions = getSelectedProductOptions({
-    searchParams: new URL(request.url).searchParams,
-  });
-  const { data } = await storefrontClient.graphql(PRODUCT_QUERY, {
-    variables: { handle, selectedOptions },
-  });
+  const url = new URL(request.url);
+  const selectedOptions = getSelectedProductOptions({ searchParams: url.searchParams });
+  const [productResult, catalog] = await Promise.all([
+    storefrontClient.graphql(PRODUCT_QUERY, {
+      variables: { handle, selectedOptions },
+      cache: Cache.short(),
+    }),
+    loadCatalog(storefrontClient),
+  ]);
 
-  if (!data?.product) throw new Response("Not Found", { status: 404 });
+  if (productResult.errors?.length) {
+    console.error(`Product query failed for ${handle}: ${productResult.errors.map((e) => e.message).join("; ")}`);
+    throw new Response("Product query failed", { status: 500 });
+  }
 
-  return {
-    product: data.product,
-    relatedProducts: data.products.nodes
-      .filter((product) => product.handle !== data.product?.handle)
-      .slice(0, 4),
-  };
+  const product = productResult.data?.product;
+  const concept = product ? null : findConcept(handle);
+  if (!product && !concept) throw new Response("Not Found", { status: 404 });
+
+  const scent = product ? scentOf(product.tags) : concept!.scent;
+  const family = product ? familyOf(product.handle) : concept!.family;
+  const all = [...catalog.live, ...catalog.concepts];
+
+  // The scent switch: every product in the family, live or coming soon.
+  const siblings = all
+    .filter((item) => item.family === family)
+    .sort((a, b) => SCENT_ORDER.indexOf(a.scent ?? "botanical") - SCENT_ORDER.indexOf(b.scent ?? "botanical"))
+    .map((item) => ({ handle: item.handle, scent: item.scent, comingSoon: !item.live }));
+
+  // Pairs well with: the same scent in other formats, live first, topped up from the range.
+  let pairs = all.filter((item) => item.scent === scent && item.family !== family);
+  pairs.sort((a, b) => Number(!a.live) - Number(!b.live));
+  pairs = pairs.slice(0, 4);
+  if (pairs.length < 4) {
+    pairs = pairs.concat(
+      catalog.live.filter((item) => item.family !== family && !pairs.includes(item)).slice(0, 4 - pairs.length),
+    );
+  }
+
+  const common = { handle, scent, family, siblings, pairs, origin: url.origin };
+  if (product) {
+    return { kind: "live" as const, product, category: categoryOf(product.tags, product.productType), ...common };
+  }
+  return { kind: "concept" as const, concept: concept!, category: concept!.category, ...common };
 }
 
-type ProductData = Route.ComponentProps["loaderData"]["product"];
-type ProductVariant = NonNullable<ProductData["selectedOrFirstAvailableVariant"]>;
-type RelatedProduct = Route.ComponentProps["loaderData"]["relatedProducts"][number];
+const GALLERY_SIZES = "(min-width: 48rem) 50vw, 100vw";
+const GALLERY_WIDTHS = [480, 720, 960, 1200, 1600];
 
-type ProductImage = {
-  id?: string | null;
-  url: string;
-  altText?: string | null;
-  width?: number | null;
-  height?: number | null;
-};
+type LiveData = Extract<Route.ComponentProps["loaderData"], { kind: "live" }>;
+type PageData = Route.ComponentProps["loaderData"];
+type ProductData = LiveData["product"];
+type ProductVariant = NonNullable<ProductData["selectedOrFirstAvailableVariant"]>;
 
 type SwatchValue = {
   color?: string | null;
@@ -225,6 +283,7 @@ function hasSwatchData(product: ProductData, optionName: string) {
   );
 }
 
+
 function ProductViewedTracker({ product }: { product: ProductData }) {
   useEffect(() => {
     const selectedVariant = product.selectedOrFirstAvailableVariant;
@@ -247,170 +306,101 @@ function ProductViewedTracker({ product }: { product: ProductData }) {
   return null;
 }
 
-function useGalleryImages(product: ProductData, selectedVariant: ProductVariant | null) {
-  return useMemo(() => {
-    const images: ProductImage[] = [];
-    const seen = new Set<string>();
-    const addImage = (image: ProductImage | null | undefined) => {
-      if (!image?.url || seen.has(image.url)) return;
-      seen.add(image.url);
-      images.push(image);
-    };
 
-    addImage(selectedVariant?.image ?? product.featuredImage ?? product.images.nodes[0]);
-    for (const image of product.images.nodes) addImage(image);
-    return images;
-  }, [product, selectedVariant]);
-}
 
-function galleryDotClass(active: boolean) {
-  if (active) return "bg-on-surface size-2 rounded-full";
-  return "bg-on-surface/30 size-2 rounded-full";
-}
-
-function ProductGallery({
-  product,
-  selectedVariant,
-}: {
-  product: ProductData;
-  selectedVariant: ProductVariant | null;
-}) {
-  const images = useGalleryImages(product, selectedVariant);
-  const primaryImageUrl = images[0]?.url;
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  useEffect(() => setActiveIndex(0), [primaryImageUrl]);
-
+function ProductImage({ data }: { data: PageData }) {
+  if (data.kind === "concept") {
+    return (
+      <Media
+        name={`pack-${data.handle}`}
+        alt={data.concept.title}
+        sizes={GALLERY_SIZES}
+        width={1000}
+        height={1250}
+        priority
+        className="h-full w-full object-cover"
+      />
+    );
+  }
+  const image = data.product.featuredImage;
+  if (!image) return null;
   return (
-    <div data-testid="product-gallery">
-      <div
-        role="region"
-        aria-roledescription="carousel"
-        aria-label={product.title}
-        className="relative grid"
-      >
-        <div
-          data-product-gallery-track
-          className="flex snap-x snap-mandatory overflow-x-auto md:grid md:grid-cols-2 md:overflow-visible"
-          style={{ scrollbarWidth: "none" }}
-          tabIndex={0}
-          onScroll={(event) => {
-            const track = event.currentTarget;
-            if (track.clientWidth > 0) {
-              setActiveIndex(Math.round(track.scrollLeft / track.clientWidth));
-            }
-          }}
-        >
-          {images.map((image, index) => (
-            <div
-              key={image.url}
-              role="group"
-              aria-roledescription="slide"
-              aria-label={`Slide ${index + 1} of ${images.length}`}
-              className="w-full shrink-0 snap-center contain-paint md:w-auto md:shrink"
+    <img
+      src={shopifyImageUrl(image.url, 900)}
+      srcSet={shopifySrcSet(image.url, GALLERY_WIDTHS)}
+      sizes={GALLERY_SIZES}
+      alt={image.altText || data.product.title}
+      width={1000}
+      height={1250}
+      fetchPriority="high"
+      className="h-full w-full object-cover"
+    />
+  );
+}
+
+function ScentSwitch({ data }: { data: PageData }) {
+  if (data.siblings.length < 2) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-muted text-[13px]">Scent</span>
+      <nav aria-label="Scent" className="border-line flex flex-wrap gap-x-6 border-b">
+        {data.siblings.map((sibling) => {
+          const active = sibling.handle === data.handle;
+          const label = SCENT_LABEL[sibling.scent ?? "botanical"] + (sibling.comingSoon ? " · soon" : "");
+          return (
+            <Link
+              key={sibling.handle}
+              to={`/products/${sibling.handle}`}
+              prefetch="intent"
+              preventScrollReset
+              aria-current={active ? "page" : undefined}
+              className={`relative inline-flex h-11 items-center text-sm ${active ? "text-ink after:bg-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px" : "text-muted hover:text-ink"}`}
             >
-              <div className="bg-surface-secondary aspect-square overflow-hidden">
-                <img
-                  src={image.url}
-                  alt={image.altText ?? product.title}
-                  width={image.width ?? undefined}
-                  height={image.height ?? undefined}
-                  className="h-full w-full object-cover"
-                  loading={index === 0 ? "eager" : "lazy"}
-                  fetchPriority={index === 0 ? "high" : "auto"}
-                  data-testid={index === 0 ? "product-gallery-image" : undefined}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-        {images.length > 1 ? (
-          <div className="absolute inset-x-0 bottom-4 z-10 flex items-center justify-center gap-3 md:hidden">
-            <div
-              data-slideshow-dots
-              role="group"
-              aria-label="Slideshow pagination"
-              className="flex items-center justify-center gap-2"
-            >
-              {images.map((image, index) => (
-                <span key={image.url} className={galleryDotClass(index === activeIndex)} />
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
     </div>
   );
 }
 
-function PriceBlock({
-  product,
-  selectedVariant,
-}: {
-  product: ProductData;
-  selectedVariant: ProductVariant | null;
-}) {
+function PriceBlock({ product, selectedVariant }: { product: ProductData; selectedVariant: ProductVariant | null }) {
   const price = selectedVariant?.price ?? product.priceRange.minVariantPrice;
   const compareAt = selectedVariant?.compareAtPrice;
   const percent = salePercent(price, compareAt);
 
   return (
-    <div className="mt-4" data-product-price>
-      <div className="inline-flex flex-wrap items-baseline gap-2">
-        {compareAt && percent ? (
-          <>
-            <span className="text-sale font-medium">
-              <span className="sr-only">Sale price: </span>
-              {formatPrice(price)}
-            </span>
-            <s className="text-compare text-sm">
-              <span className="sr-only">Regular price: </span>
-              {formatPrice(compareAt)}
-            </s>
-            <span className="text-sale text-sm font-medium" aria-label={`Save ${percent}%`}>
-              (-{percent}%)
-            </span>
-          </>
-        ) : (
-          <span className="text-on-surface font-medium">
-            <span className="sr-only">Price: </span>
-            {formatPrice(price)}
+    <div className="border-line border-t pt-4 text-[22px] tracking-[-0.01em]" data-product-price>
+      {compareAt && percent ? (
+        <span className="inline-flex flex-wrap items-baseline gap-3">
+          <span>
+            <span className="sr-only">Sale price: </span>
+            {wholePrice(price)}
           </span>
-        )}
-      </div>
+          <s className="text-muted text-base">
+            <span className="sr-only">Regular price: </span>
+            {formatPrice(compareAt)}
+          </s>
+        </span>
+      ) : (
+        <span>
+          <span className="sr-only">Price: </span>
+          {wholePrice(price)}
+        </span>
+      )}
     </div>
   );
 }
 
+// Low-stock counts need the `unauthenticated_read_product_inventory` scope, which this
+// storefront does not request, so only the sold-out state is shown.
 function InventoryHint({ selectedVariant }: { selectedVariant: ProductVariant | null }) {
-  if (!selectedVariant) return null;
-  if (!selectedVariant.availableForSale) {
-    return (
-      <div className="mt-3">
-        <div className="flex items-center gap-2 text-sm" data-product-inventory>
-          <span
-            className="bg-critical inline-block h-2 w-2 shrink-0 rounded-full"
-            aria-hidden="true"
-          />
-          <span className="text-critical font-medium">Out of stock</span>
-        </div>
-      </div>
-    );
-  }
-
-  const quantity = selectedVariant.quantityAvailable;
-  if (quantity == null || quantity > 5) return null;
-
+  if (!selectedVariant || selectedVariant.availableForSale) return null;
   return (
-    <div className="mt-3">
-      <div className="flex items-center gap-2 text-sm" data-product-inventory>
-        <span
-          className="bg-warning inline-block h-2 w-2 shrink-0 rounded-full"
-          aria-hidden="true"
-        />
-        <span className="text-warning font-medium">Only {quantity} left in stock</span>
-      </div>
-    </div>
+    <p className="text-sm" data-product-inventory>
+      Out of stock
+    </p>
   );
 }
 
@@ -428,6 +418,7 @@ function isPlainActivation(event: MouseEvent<HTMLAnchorElement>) {
   );
 }
 
+
 function VariantOptions({ product }: { product: ProductData }) {
   const { options, register } = useProductForm();
   const swatches = useMemo(() => buildSwatchLookup(product), [product]);
@@ -443,7 +434,7 @@ function VariantOptions({ product }: { product: ProductData }) {
 
         return (
           <fieldset key={option.name} className="space-y-2">
-            <legend className="text-on-surface text-sm font-medium">
+            <legend className="text-muted mb-2.5 text-[13px]">
               {option.name}
               {selectedValue ? `: ${selectedValue}` : ""}
             </legend>
@@ -557,118 +548,73 @@ function VariantOptions({ product }: { product: ProductData }) {
   );
 }
 
-function QuantitySelector({
-  quantity,
-  setQuantity,
-}: {
-  quantity: number;
-  setQuantity: (quantity: number) => void;
-}) {
+
+function QuantitySelector({ quantity, setQuantity }: { quantity: number; setQuantity: (quantity: number) => void }) {
   const { register } = useProductForm();
   const clamp = (value: number) => Math.min(99, Math.max(1, value));
 
   return (
-    <div className="shrink-0">
-      <label className="text-on-surface mb-2 block text-sm font-medium" htmlFor="quantity">
-        Quantity
-      </label>
-      <div
-        className="quantity-selector-outlined rounded-input inline-flex items-center"
-        data-testid="quantity-stepper"
+    <div className="border-line inline-flex h-12 shrink-0 items-center border" data-testid="quantity-stepper">
+      <button
+        type="button"
+        className="inline-flex h-full w-11 items-center justify-center text-base disabled:opacity-30"
+        aria-label="Decrease quantity"
+        onClick={() => setQuantity(clamp(quantity - 1))}
+        disabled={quantity <= 1}
       >
-        <button
-          type="button"
-          className="text-on-surface-secondary hover:text-on-surface inline-flex size-11 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50 motion-safe:transition-[color,transform] motion-safe:active:scale-[0.90]"
-          aria-label="Decrease quantity"
-          onClick={() => setQuantity(clamp(quantity - 1))}
-          disabled={quantity <= 1}
-        >
-          <img src="/icons/icon-minus.svg" alt="" className="size-4" aria-hidden="true" />
-        </button>
-        <input
-          type="number"
-          id="quantity"
-          {...register("quantity", { value: quantity })}
-          min={1}
-          max={99}
-          step={1}
-          className="number-reset text-on-surface h-11 w-12 rounded-none border-0 bg-transparent p-0 text-center text-sm"
-          aria-label="Quantity"
-          onChange={(event) =>
-            setQuantity(clamp(Number.parseInt(event.currentTarget.value, 10) || 1))
-          }
-        />
-        <button
-          type="button"
-          className="text-on-surface-secondary hover:text-on-surface inline-flex size-11 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50 motion-safe:transition-[color,transform] motion-safe:active:scale-[0.90]"
-          aria-label="Increase quantity"
-          onClick={() => setQuantity(clamp(quantity + 1))}
-          disabled={quantity >= 99}
-        >
-          <img src="/icons/icon-plus.svg" alt="" className="size-4" aria-hidden="true" />
-        </button>
-      </div>
+        −
+      </button>
+      <input
+        type="number"
+        id="quantity"
+        {...register("quantity", { value: quantity })}
+        min={1}
+        max={99}
+        step={1}
+        className="number-reset !h-full !w-10 !border-0 !bg-transparent !p-0 text-center !text-sm"
+        aria-label="Quantity"
+        onChange={(event) => setQuantity(clamp(Number.parseInt(event.currentTarget.value, 10) || 1))}
+      />
+      <button
+        type="button"
+        className="inline-flex h-full w-11 items-center justify-center text-base disabled:opacity-30"
+        aria-label="Increase quantity"
+        onClick={() => setQuantity(clamp(quantity + 1))}
+        disabled={quantity >= 99}
+      >
+        +
+      </button>
     </div>
   );
 }
 
-function AddToCart({
-  product,
-  quantity,
-  setQuantity,
-  selectedVariant,
-}: {
-  product: ProductData;
-  quantity: number;
-  setQuantity: (quantity: number) => void;
-  selectedVariant: ProductVariant | null;
-}) {
+function AddToCart({ product, selectedVariant }: { product: ProductData; selectedVariant: ProductVariant | null }) {
   const { options, register, formProps, errors, pending } = useProductForm();
+  const [quantity, setQuantity] = useState(1);
   const addable = canAddToCart(product, options);
-  const buttonText = addable ? "Add to cart" : selectedVariant ? "Sold out" : "Select options";
+  const buttonText = addable ? "Add to bag" : selectedVariant ? "Sold out" : "Select options";
 
   return (
     <>
-      <form {...formProps({ afterSubmit: openCartDrawer })}>
-        <div className="mt-6 mb-10 flex items-center gap-4">
-          <QuantitySelector quantity={quantity} setQuantity={setQuantity} />
-        </div>
+      <form {...formProps({ afterSubmit: openCartDrawer })} className="flex flex-wrap gap-3">
+        <QuantitySelector quantity={quantity} setQuantity={setQuantity} />
         <input type="hidden" {...register("merchandiseId", {})} />
         <button
           {...register("addToCart", {})}
-          className="rounded-button button-primary focus-visible:outline-accent inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 px-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 motion-safe:transition-[color,background-color,border-color,transform] motion-safe:active:scale-[0.97]"
+          className="pw-btn pw-btn--primary min-w-[200px] flex-1"
           disabled={!addable || pending}
           data-testid="add-to-cart"
         >
           {buttonText}
         </button>
       </form>
-      {selectedVariant ? (
-        <div className="mt-3">
-          <ShopPayButton
-            variants={[{ id: selectedVariant.id, quantity }]}
-            disabled={!addable || pending}
-            width="100%"
-            borderRadius="8px"
-          />
-        </div>
-      ) : null}
+      <span className="text-muted text-[13px]">
+        Complimentary US shipping on orders over ${FREE_SHIPPING_THRESHOLD}.
+      </span>
       {[...errors.userErrors, ...errors.warnings, ...errors.networkErrors].length ? (
-        <div className="mt-3 grid gap-1 text-sm" role="alert">
-          {errors.userErrors.map((error) => (
-            <p key={error.message} className="text-critical">
-              {error.message}
-            </p>
-          ))}
-          {errors.warnings.map((warning) => (
-            <p key={warning.message} className="text-warning">
-              {warning.message}
-            </p>
-          ))}
-          {errors.networkErrors.map((error) => (
-            <p key={error.message} className="text-critical">
-              {error.message}
-            </p>
+        <div className="grid gap-1 text-sm" role="alert">
+          {[...errors.userErrors, ...errors.warnings, ...errors.networkErrors].map((error) => (
+            <p key={error.message}>{error.message}</p>
           ))}
         </div>
       ) : null}
@@ -676,117 +622,301 @@ function AddToCart({
   );
 }
 
-function ProductInfo({
-  product,
-  selectedVariant,
-}: {
-  product: ProductData;
-  selectedVariant: ProductVariant | null;
-}) {
-  const [quantity, setQuantity] = useState(1);
-
+function Details({ title, size, extra }: { title: string; size: string; extra?: string }) {
+  const items = [
+    {
+      title: "Details",
+      body: `${title} · ${size}. Plant-based personal care, as printed on the label.${extra ? ` ${extra}` : ""}`,
+    },
+    { title: "Ingredients", body: "[Ingredient list to confirm]" },
+    {
+      title: "Shipping & returns",
+      body: `Complimentary US standard shipping on orders of $${FREE_SHIPPING_THRESHOLD} and above; $8 below. Other options and international rates are calculated at checkout. [Returns policy to confirm]`,
+    },
+  ];
   return (
-    <div className="flex flex-col gap-6 md:sticky md:top-8 md:self-start">
-      <div className="pt-4 md:pt-8">
-        {product.vendor ? (
-          <p className="type-body-sm text-on-surface-secondary mb-4 tracking-wide uppercase">
-            {product.vendor}
-          </p>
-        ) : null}
-        <h1 className="type-display text-on-surface">{product.title}</h1>
-        <PriceBlock product={product} selectedVariant={selectedVariant} />
-        <InventoryHint selectedVariant={selectedVariant} />
-      </div>
-
-      <span className="sr-only" aria-live="polite" id="inventory-status" />
-
-      {product.description ? (
-        <div className="type-body-sm text-on-surface-secondary leading-relaxed">
-          {product.description}
-        </div>
-      ) : null}
-
-      <div data-product-form>
-        <span className="sr-only" aria-live="polite" data-add-to-cart-status />
-        <VariantOptions product={product} />
-        <AddToCart
-          product={product}
-          quantity={quantity}
-          setQuantity={setQuantity}
-          selectedVariant={selectedVariant}
-        />
-      </div>
-
-      <h2 className="sr-only">Product details</h2>
-      <details className="group border-border border-t border-b" name="product-details" open>
-        <summary className="marker-hidden text-on-surface hover:text-on-surface-secondary flex cursor-pointer items-center justify-between px-1 py-4 text-sm font-medium">
-          <span className="text-sm font-medium">Description</span>
-          <span
-            className="ms-4 size-4 shrink-0 group-open:rotate-180 motion-safe:transition-transform motion-safe:duration-200"
-            aria-hidden="true"
-          >
-            <img src="/icons/icon-chevron-down.svg" alt="" className="size-4" />
-          </span>
-        </summary>
-        <div className="richtext text-on-surface-secondary px-1 pb-4 text-sm">
-          {product.descriptionHtml ? (
-            <div dangerouslySetInnerHTML={{ __html: product.descriptionHtml }} />
-          ) : (
-            <p>{product.description}</p>
-          )}
-        </div>
-      </details>
+    <div className="border-line border-b">
+      {items.map((item, index) => (
+        <details key={item.title} name="product-details" open={index === 0} className="group border-line border-t">
+          <summary className="marker-hidden flex min-h-14 cursor-pointer items-center justify-between gap-4 text-sm">
+            {item.title}
+            <span aria-hidden="true" className="w-[18px] text-center text-lg group-open:hidden">
+              +
+            </span>
+            <span aria-hidden="true" className="hidden w-[18px] text-center text-lg group-open:inline">
+              −
+            </span>
+          </summary>
+          <p className="text-muted max-w-[620px] pb-[22px] text-sm leading-[1.65]">{item.body}</p>
+        </details>
+      ))}
     </div>
   );
 }
 
-function ProductPageContent({ product }: { product: ProductData }) {
+// Shopify descriptions open with "Title · size." which the page already shows.
+function introFor(product: ProductData) {
+  const text = product.description.replace(/^[^.]*·[^.]*\.\s*/, "").trim();
+  return text || "A Plainwell everyday essential for your body, your bathroom, and the people you share it with.";
+}
+
+function eyebrowFor(data: PageData) {
+  const category = data.category ? CATEGORY_LABEL[data.category].label : "Plainwell";
+  return [category, data.scent ? SCENT_LABEL[data.scent] : null].filter(Boolean).join(" · ");
+}
+
+function LiveInfo({ data }: { data: LiveData }) {
+  const { product } = data;
   const { selectedVariant } = useProductForm();
+  const size = selectedVariant?.selectedOptions.find((o) => o.name === "Size")?.value ?? "";
+  const hasChoices = product.options.some((option) => option.optionValues.length > 1);
 
   return (
-    <section className="max-w-page px-margin mx-auto w-full pb-4">
-      <div className="product-grid mb-16 grid grid-cols-1 gap-6 md:gap-12">
-        <ProductGallery product={product} selectedVariant={selectedVariant} />
-        <ProductInfo product={product} selectedVariant={selectedVariant} />
+    <>
+      <div className="flex flex-col gap-2.5">
+        <span className="pw-eyebrow">{eyebrowFor(data)}</span>
+        <h1 className="text-[clamp(34px,3.4vw,44px)] leading-[1.06] tracking-[-0.02em]">{product.title}</h1>
+        {data.scent ? <span className="text-muted text-[15px]">{SCENT_NOTE[data.scent]}</span> : null}
+        <a href="#reviews" className="inline-flex items-center gap-2.5 pt-1 text-[13px]">
+          <span aria-hidden="true" className="tracking-[2px]">
+            ★★★★★
+          </span>
+          <span className="pw-link">Sample reviews</span>
+        </a>
       </div>
+      <p className="text-base leading-[1.65]">{introFor(product)}</p>
+      <ScentSwitch data={data} />
+      {hasChoices ? (
+        <VariantOptions product={product} />
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          <span className="text-muted text-[13px]">Size</span>
+          <span className="border-ink inline-flex h-10 items-center self-start border px-4 text-[13px]">{size}</span>
+        </div>
+      )}
+      <PriceBlock product={product} selectedVariant={selectedVariant} />
+      <InventoryHint selectedVariant={selectedVariant} />
+      <div data-product-form className="flex flex-col gap-3">
+        <span className="sr-only" aria-live="polite" data-add-to-cart-status />
+        <AddToCart product={product} selectedVariant={selectedVariant} />
+      </div>
+      <Details title={product.title} size={size} />
+    </>
+  );
+}
+
+function ConceptInfo({ data, concept }: { data: PageData; concept: ConceptProduct }) {
+  return (
+    <>
+      <div className="flex flex-col gap-2.5">
+        <span className="pw-eyebrow">{eyebrowFor(data)}</span>
+        <h1 className="text-[clamp(34px,3.4vw,44px)] leading-[1.06] tracking-[-0.02em]">{concept.title}</h1>
+        <span className="text-muted text-[15px]">Coming soon · {SCENT_NOTE[concept.scent]}</span>
+      </div>
+      <p className="text-base leading-[1.65]">Coming soon to the Plainwell shelf.</p>
+      <ScentSwitch data={data} />
+      <div className="flex flex-col gap-2.5">
+        <span className="text-muted text-[13px]">Size</span>
+        <span className="border-ink inline-flex h-10 items-center self-start border px-4 text-[13px]">
+          {concept.size}
+          {concept.bottleRefills ? " · draft size" : ""}
+        </span>
+      </div>
+      <div className="border-line border-t pt-4 text-[22px] tracking-[-0.01em]">Price to come</div>
+      <div className="flex flex-col gap-3">
+        <button type="button" disabled className="pw-btn pw-btn--secondary w-full">
+          Coming soon
+        </button>
+        <span className="text-muted text-[13px]">
+          A new product on its way. Price, formula and availability are still to come.
+        </span>
+      </div>
+      <Details
+        title={concept.title}
+        size={concept.size}
+        extra={
+          concept.bottleRefills
+            ? `Refills a 16 fl oz bottle ${concept.bottleRefills === 2 ? "twice" : `${concept.bottleRefills} times`}. The 32 fl oz size is a draft.`
+            : undefined
+        }
+      />
+    </>
+  );
+}
+
+const SAMPLE_REVIEWS = [
+  { name: "Sample reviewer A.", household: "Household of 2", rating: 5, date: "Oct 9, 2026", body: "Sample review text. Two or three plain sentences in the customer’s own words, once real reviews are connected." },
+  { name: "Sample reviewer B.", household: "Household of 4+", rating: 5, date: "Oct 2, 2026", body: "Sample review text. A short note on texture and scent." },
+  { name: "Sample reviewer C.", household: "Just me", rating: 4, date: "Sep 27, 2026", body: "Sample review text. A four-star review with one small reservation, to show how mixed feedback reads." },
+];
+const SAMPLE_BARS: [number, number][] = [[5, 98], [4, 19], [3, 6], [2, 2], [1, 1]];
+
+// Layout for reviews, filled with clearly labelled sample content until a reviews app is connected.
+function Reviews({ title, live }: { title: string; live: boolean }) {
+  return (
+    <section id="reviews" className="pw-gutter flex scroll-mt-24 flex-col gap-10 pt-28" aria-labelledby="reviews-heading">
+      <div className="border-ink flex flex-wrap items-end justify-between gap-6 border-b pb-[22px]">
+        <div className="flex flex-col gap-2.5">
+          <span className="pw-eyebrow">Reviews · Sample content</span>
+          <h2 id="reviews-heading" className="pw-h2">
+            From the shared shelf
+          </h2>
+        </div>
+      </div>
+      {!live ? (
+        <p className="text-muted pb-6 text-base">Reviews open once {title} is available.</p>
+      ) : (
+        <div className="grid items-start gap-x-16 gap-y-10 lg:grid-cols-3">
+          <div className="flex max-w-[360px] flex-col gap-[22px]">
+            <div className="flex items-baseline gap-3.5">
+              <span className="text-[64px] leading-none tracking-[-0.03em]">4.7</span>
+              <span className="text-muted text-[13px]">out of 5 · sample</span>
+            </div>
+            <div className="flex flex-col gap-2 pt-1.5">
+              {SAMPLE_BARS.map(([stars, count]) => (
+                <div key={stars} className="grid grid-cols-[16px_1fr_36px] items-center gap-3 text-[13px]">
+                  <span>{stars}</span>
+                  <div className="bg-line relative h-0.5">
+                    <div className="bg-ink absolute inset-y-0 left-0" style={{ width: `${Math.round((count / 98) * 100)}%` }} />
+                  </div>
+                  <span className="text-muted text-right">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-col lg:col-span-2">
+            {SAMPLE_REVIEWS.map((review) => (
+              <article key={review.name} className="border-line grid gap-x-8 gap-y-3 border-b py-7 sm:grid-cols-3">
+                <div className="flex flex-col gap-1">
+                  <span className="font-medium">{review.name}</span>
+                  <span className="text-muted pt-1.5 text-[13px]">{review.household}</span>
+                </div>
+                <div className="flex min-w-0 flex-col gap-2 sm:col-span-2">
+                  <div className="flex justify-between gap-4">
+                    <span role="img" aria-label={`${review.rating} out of 5 stars`} className="tracking-[2px]">
+                      {"★".repeat(review.rating)}
+                      <span className="text-line">{"★".repeat(5 - review.rating)}</span>
+                    </span>
+                    <span className="text-muted text-[13px]">{review.date}</span>
+                  </div>
+                  <span className="font-medium">Sample review headline</span>
+                  <p className="max-w-[620px] leading-[1.65]">{review.body}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function RelatedProducts({ products }: { products: RelatedProduct[] }) {
-  if (products.length === 0) return null;
+function ProductJsonLd({ data }: { data: LiveData }) {
+  const { product } = data;
+  const variant = product.selectedOrFirstAvailableVariant;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.title,
+    description: product.description,
+    image: product.featuredImage?.url,
+    sku: variant?.sku || undefined,
+    brand: { "@type": "Brand", name: product.vendor || "Plainwell Body Co." },
+    offers: variant
+      ? {
+          "@type": "Offer",
+          url: `${data.origin}/products/${product.handle}`,
+          price: variant.price.amount,
+          priceCurrency: variant.price.currencyCode,
+          availability: variant.availableForSale ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+        }
+      : undefined,
+  };
+  const crumbs = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Shop all", item: `${data.origin}/collections/all` },
+      ...(data.category
+        ? [{ "@type": "ListItem", position: 2, name: CATEGORY_LABEL[data.category].label, item: `${data.origin}${CATEGORY_LABEL[data.category].href}` }]
+        : []),
+      { "@type": "ListItem", position: data.category ? 3 : 2, name: product.title },
+    ],
+  };
+  return (
+    <>
+      <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
+      <script type="application/ld+json">{JSON.stringify(crumbs)}</script>
+    </>
+  );
+}
+
+function ProductPage({ data, info }: { data: PageData; info: ReactNode }) {
+  const title = data.kind === "live" ? data.product.title : data.concept.title;
+  const ritual = ritualFor(data.scent as Scent | null, data.family);
 
   return (
-    <section className="py-4" aria-labelledby="related-products-heading">
-      <div className="border-border border-t pt-12">
-        <h2
-          id="related-products-heading"
-          className="type-heading-xl max-w-page px-margin mx-auto mb-8"
-        >
-          More products
-        </h2>
-        <div className="max-w-page px-margin mx-auto contain-paint">
-          <ul
-            role="list"
-            className="grid grid-cols-1 gap-x-1 gap-y-10 md:grid-cols-2 lg:grid-cols-4"
-          >
-            {products.map((product) => (
-              <li key={product.handle}>
-                <ProductCard product={product} />
-              </li>
-            ))}
-          </ul>
+    <main className="flex-1" id="main-content" tabIndex={-1}>
+      <nav aria-label="Breadcrumb" className="pw-gutter text-muted flex flex-wrap gap-2 py-5 text-[13px]">
+        <Link to="/collections/all" className="pw-hover">
+          Shop all
+        </Link>
+        {data.category ? (
+          <>
+            <span aria-hidden="true">/</span>
+            <Link to={CATEGORY_LABEL[data.category].href} className="pw-hover">
+              {CATEGORY_LABEL[data.category].label}
+            </Link>
+          </>
+        ) : null}
+        <span aria-hidden="true">/</span>
+        <span className="text-ink" aria-current="page">
+          {title}
+        </span>
+      </nav>
+      <section className="border-line grid items-start border-t md:grid-cols-2">
+        <div className="bg-shelf border-line aspect-[4/5] md:col-start-1 md:row-start-1 md:border-r">
+          <ProductImage data={data} />
         </div>
-      </div>
-    </section>
+        <div className="flex max-w-[620px] flex-col gap-7 px-5 pt-10 pb-14 md:sticky md:top-[var(--spacing-header)] md:col-start-2 md:row-span-2 md:row-start-1 md:px-[clamp(24px,5vw,88px)] md:pt-14 md:pb-[72px]">
+          {info}
+        </div>
+        <div className="bg-olive border-line aspect-[4/5] border-t md:col-start-1 md:row-start-2 md:border-r">
+          <Media
+            name={ritual.name}
+            alt={ritual.alt}
+            sizes={GALLERY_SIZES}
+            width={1254}
+            height={1254}
+            className="h-full w-full object-cover"
+          />
+        </div>
+      </section>
+      <Reviews title={title} live={data.kind === "live"} />
+      <section className="pt-28 pb-28" aria-labelledby="pairs-heading">
+        <div className="pw-gutter flex items-baseline justify-between gap-4 pb-[22px]">
+          <h2 id="pairs-heading" className="pw-section-label">
+            Pairs well with
+          </h2>
+          <Link to="/collections/all" className="pw-link">
+            Shop all
+          </Link>
+        </div>
+        <ProductGrid items={data.pairs as CardItem[]} />
+      </section>
+    </main>
   );
 }
 
 export default function ProductRoute({ loaderData }: Route.ComponentProps) {
-  const { product, relatedProducts } = loaderData;
   const navigate = useNavigate();
   const location = useLocation();
 
+  if (loaderData.kind === "concept") {
+    return <ProductPage data={loaderData} info={<ConceptInfo data={loaderData} concept={loaderData.concept} />} />;
+  }
+
+  const { product } = loaderData;
   return (
     <ProductProvider
       product={product}
@@ -807,10 +937,8 @@ export default function ProductRoute({ loaderData }: Route.ComponentProps) {
       }}
     >
       <ProductViewedTracker product={product} />
-      <main className="flex-1" id="main-content" tabIndex={-1}>
-        <ProductPageContent product={product} />
-        <RelatedProducts products={relatedProducts} />
-      </main>
+      <ProductJsonLd data={loaderData} />
+      <ProductPage data={loaderData} info={<LiveInfo data={loaderData} />} />
     </ProductProvider>
   );
 }

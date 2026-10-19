@@ -10,7 +10,7 @@ import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop
 import type { Route } from "./+types/cart";
 
 export function meta({ matches }: Route.MetaArgs) {
-  return [{ title: formatPageTitle("Cart", getShopNameFromRootMatch(matches[0])) }];
+  return [{ title: formatPageTitle("Your bag", getShopNameFromRootMatch(matches[0])) }];
 }
 
 export default function CartRoute() {
@@ -29,12 +29,12 @@ export default function CartRoute() {
       className="max-w-page px-margin mx-auto w-full flex-1 py-12"
     >
       <h1 id="cart-page-title" tabIndex={-1} className="type-display text-on-surface mb-8">
-        Cart
+        Your bag
       </h1>
       {loading ? <p className="text-on-surface-secondary">Loading cart…</p> : null}
       {!loading && lines.length === 0 ? (
         <div>
-          <p className="text-on-surface font-medium">Your cart is empty.</p>
+          <p className="text-on-surface font-medium">Your bag is empty.</p>
           <p className="text-on-surface-secondary mt-2 text-sm">
             Looks like you haven&apos;t added anything to your cart yet.
           </p>

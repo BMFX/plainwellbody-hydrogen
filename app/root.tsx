@@ -35,9 +35,12 @@ import {
 
 import type { Route } from "./+types/root";
 
+import fontHref from "@fontsource-variable/instrument-sans/files/instrument-sans-latin-wght-normal.woff2?url";
+
 import appStylesHref from "./app.css?url";
 
 export const links: Route.LinksFunction = () => [
+  { rel: "preload", href: fontHref, as: "font", type: "font/woff2", crossOrigin: "anonymous" },
   { rel: "stylesheet", href: appStylesHref },
   { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
 ];
@@ -131,7 +134,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body className="bg-surface text-on-surface font-body flex min-h-svh flex-col antialiased">
+      <body className="bg-paper text-ink font-body flex min-h-svh flex-col antialiased">
         <a
           href="#main-content"
           className="focus-visible:bg-interactive focus-visible:text-interactive-text sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:start-4 focus-visible:top-4 focus-visible:z-50 focus-visible:rounded focus-visible:px-4 focus-visible:py-2"
@@ -152,9 +155,9 @@ export default function App({ loaderData }: Route.ComponentProps) {
       <PageViewedTracker />
       <CartAnalyticsTracker />
       <AnnouncementBar />
-      <Header shopInfo={loaderData.shopInfo} />
+      <Header shopName={loaderData.shopInfo.name} />
       <Outlet />
-      <Footer shopInfo={loaderData.shopInfo} />
+      <Footer shopName={loaderData.shopInfo.name} />
       <CartDrawer />
       <SearchDrawer />
     </CartProvider>

@@ -1,62 +1,52 @@
 import { Link } from "react-router";
 
-import type { StorefrontShop } from "~/lib/storefront-shop";
+import { mediaFile } from "~/components/Media";
+import { FOOTER_COLUMNS } from "~/lib/plainwell";
 
-import { PaymentMethodIcon } from "./PaymentMethodIcon";
-
-const linkClass =
-  "min-h-touch-target text-on-surface-secondary hover:text-on-surface focus-visible:outline-accent inline-flex items-center font-normal no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-safe:transition-colors";
-
-export function Footer({ shopInfo }: { shopInfo: StorefrontShop }) {
+export function Footer({ shopName }: { shopName: string }) {
   return (
-    <footer className="max-w-page px-margin mx-auto w-full">
-      <div
-        className={`border-border grid grid-cols-1 gap-8 border-t py-12 text-sm md:grid-cols-2 ${shopInfo.paymentMethods.length > 0 ? "lg:grid-cols-3" : ""}`}
-      >
-        <div className="min-w-0 wrap-anywhere">
-          <h2 className="type-body-sm text-on-surface mb-4 font-medium">{shopInfo.name}</h2>
-        </div>
-        <nav aria-labelledby="footer-customer-care-heading">
-          <h2
-            className="type-body-sm text-on-surface mb-4 font-medium"
-            id="footer-customer-care-heading"
-          >
-            Customer care
-          </h2>
-          <ul role="list" className="flex flex-col gap-2">
-            <li>
-              <Link to="/search" className={linkClass}>
-                Search
-              </Link>
-            </li>
-            <li>
-              <Link to="/account" className={linkClass}>
-                Account
-              </Link>
-            </li>
-          </ul>
-        </nav>
-        {shopInfo.paymentMethods.length > 0 ? (
-          <div>
-            <h2
-              id="footer-payment-methods-heading"
-              className="type-body-sm text-on-surface mb-4 font-medium"
-            >
-              Payment methods
-            </h2>
-            <ul
-              role="list"
-              aria-labelledby="footer-payment-methods-heading"
-              className="flex flex-wrap items-center gap-2"
-            >
-              {shopInfo.paymentMethods.map((method) => (
-                <li key={method} className="max-w-full">
-                  <PaymentMethodIcon method={method} />
-                </li>
-              ))}
-            </ul>
+    <footer className="bg-ink text-paper mt-auto">
+      <div className="pw-gutter flex flex-col gap-16 pt-20 pb-8">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 lg:grid-cols-5">
+          <div className="col-span-2 flex max-w-[440px] flex-col gap-4">
+            <p className="pw-section-label font-normal">New essentials and everyday notes, now and then.</p>
+            <Link to="/pages/journal" className="pw-link self-start">
+              Read the journal
+            </Link>
           </div>
-        ) : null}
+          {FOOTER_COLUMNS.map((column) => (
+            <nav key={column.title} aria-label={column.title} className="flex flex-col gap-1 text-[13px]">
+              <h2 className="text-on-ink-muted mb-2 font-normal">{column.title}</h2>
+              {column.links.map((link) => (
+                <Link key={link.href} to={link.href} className="pw-hover flex min-h-8 items-center">
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+          ))}
+        </div>
+        <div className="border-rule-on-ink text-on-ink-muted flex flex-wrap items-end justify-between gap-6 border-t pt-7 text-xs">
+          <img
+            src={mediaFile("wordmark-white.webp")}
+            alt={shopName}
+            width={270}
+            height={128}
+            loading="lazy"
+            className="h-16 w-auto"
+          />
+          <p className="flex flex-wrap gap-x-3 gap-y-1">
+            <span>© {new Date().getFullYear()} {shopName} · Demo storefront</span>
+            <Link to="/pages/privacy" className="pw-hover">
+              Privacy
+            </Link>
+            <Link to="/pages/terms" className="pw-hover">
+              Terms
+            </Link>
+            <Link to="/pages/data-sharing-opt-out" className="pw-hover">
+              Your privacy choices
+            </Link>
+          </p>
+        </div>
       </div>
     </footer>
   );

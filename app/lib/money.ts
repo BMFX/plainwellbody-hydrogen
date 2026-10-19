@@ -21,3 +21,8 @@ export function salePercent(
   if (!Number.isFinite(current) || !Number.isFinite(compare) || compare <= current) return null;
   return Math.round(((compare - current) / compare) * 100);
 }
+
+/** Editorial and grid prices drop zero cents ($22); the bag keeps them ($22.00). */
+export function wholePrice(money: MoneyV2, locale = DEFAULT_MONEY_LOCALE): string {
+  return formatPrice(money, locale).replace(/\.00$/, "");
+}

@@ -7,6 +7,7 @@ export default [
   route("collections/:handle", "routes/collection.tsx"),
   route("cart", "routes/cart.tsx"),
   route("search", "routes/search.tsx"),
+  route("pages/:handle", "routes/page.tsx"),
   route("account", "routes/account.tsx"),
   route("*", "routes/catchall.tsx"),
 ] satisfies RouteConfig;

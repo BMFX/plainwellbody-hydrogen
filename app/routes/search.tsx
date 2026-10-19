@@ -16,7 +16,7 @@ import {
   Toolbar,
   useLoadMore,
 } from "~/components/CollectionBrowse";
-import { ProductCard } from "~/components/ProductCard";
+import { cardFromProduct, ProductGrid as CardGrid } from "~/components/ProductCard";
 import { loadSearchPage, type SearchPageData } from "~/lib/search";
 import { storefrontClientContext } from "~/lib/storefront";
 import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop";
@@ -160,22 +160,7 @@ function searchTermHiddenInput(term: string) {
 }
 
 function ProductGrid({ products }: { products: readonly ProductNode[] }) {
-  return (
-    <div className="px-1 contain-paint">
-      <ul
-        id="product-grid"
-        data-testid="product-grid"
-        role="list"
-        className="grid grid-cols-2 gap-x-1 gap-y-10 lg:grid-cols-3"
-      >
-        {products.map((product, index) => (
-          <li key={`${product.handle}-${index}`}>
-            <ProductCard product={product} priority={index < 3} />
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+  return <CardGrid items={products.map(cardFromProduct)} priorityCount={2} columns={3} />;
 }
 
 function NoResults({ term }: { term: string }) {
