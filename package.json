@@ -1,14 +1,16 @@
 {
-  "name": "hydrogen",
+  "name": "plainwellbody-hydrogen",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "build": "react-router build",
-    "deploy": "shopify hydrogen deploy --assets-dir dist/client --worker-dir dist/server",
+    "deploy": "echo \"Deploy BMFX/plainwellbody-hydrogen through Coolify using the Dockerfile.\"",
     "dev": "hydrogen skills check --mode=warn && vite dev",
     "dev:https": "hydrogen skills check --mode=warn && vite dev",
     "preview": "react-router build && vite preview",
-    "typecheck": "react-router typegen && tsc && hydrogen gql check --fail-on-warn"
+    "typecheck": "react-router typegen && tsc && hydrogen gql check --fail-on-warn",
+    "start": "node --env-file-if-exists=.env scripts/serve.mjs",
+    "test:runtime": "node --test scripts/runtime.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",
@@ -18,7 +20,8 @@
     "isbot": "^5.1.36",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router": "7.15.1"
+    "react-router": "7.15.1",
+    "@mjackson/node-fetch-server": "0.2.0"
   },
   "devDependencies": {
     "@react-router/dev": "7.15.1",

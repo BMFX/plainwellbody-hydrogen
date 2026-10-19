@@ -1,141 +1,21 @@
-# Hydrogen React Router template
+# Plainwell Body Co. — Hydrogen storefront
 
-[![Deploy to Oxygen](../../.github/images/deploy-to-oxygen.svg)](https://admin.shopify.com/hydrogen/new?template=react-router)
+Standalone Shopify Hydrogen / React Router storefront. The legacy Liquid theme remains in `BMFX/plainwellbody`; this repository contains only Hydrogen and its history.
 
-A React Router 7 (framework mode, SSR) storefront built on
-[`@shopify/hydrogen`](https://www.npmjs.com/package/@shopify/hydrogen) and the
-Oxygen runtime through Vite and Mini Oxygen. It's a starting point you can clone
-and build your store on top of — five pages on a shared layout, with a real cart,
-analytics, and a consent banner wired up.
+## Local development
 
-## Pages
+Use Node 24. Run `npm ci`, copy `.env.example` to `.env`, and supply the Shopify values. Run `npm run dev` or `npm run dev:https` for Customer Account authentication. `npm run typecheck` checks types and GraphQL; `npm run test:runtime` tests the Node adapter.
 
-- `/` — home (editorial hero, new arrivals, shop by category)
-- `/products/:handle` — product detail (gallery, variants, add to cart, Shop Pay)
-- `/collections` — all collections
-- `/collections/:handle` — collection with filters, sort, and pagination
-- `/search` — product search with the same filtering (also the no-JS fallback for the
-  predictive search drawer)
-- `/cart` — cart with Shop Pay (also the no-JS fallback for the cart drawer)
-- `/account` — Customer Account sign-in, log out, and order history
+## Coolify
 
-## What it demonstrates
+Create a Dockerfile application from `BMFX/plainwellbody-hydrogen`, branch `main`, base directory `/`, Dockerfile `/Dockerfile`, container port `3000`. Use `/healthz` for health checks. Do not expose the container directly; Coolify's reverse proxy terminates TLS. `TRUST_PROXY=true` trusts that proxy for buyer IP and HTTPS origin.
 
-- Server `loader`s as the data path; each route owns its GraphQL query (typed via
-  `gql.tada`).
-- A real cart: storefront client + request handlers + `/api/cart` + an accessible
-  cart drawer wired to Shopify Standard Actions.
-- A shared layout (header with mobile nav, footer, optional announcement bar).
-- Predictive search: Hydrogen's `/api/predictive-search` handler + an accessible
-  search drawer that suggests products as you type and falls back to the
-  `/search` page without JavaScript.
-- Analytics + a consent banner.
-- Customer Accounts: Hydrogen's `/account/login`, `/account/authorize`,
-  `/account/refresh`, and `/account/logout` handlers, backed by a signed cookie
-  session (`app/lib/session.ts`). Needs a real store, `SHOP_ID`,
-  `PUBLIC_CUSTOMER_ACCOUNT_API_CLIENT_ID`, `SESSION_SECRET`, and HTTPS.
-- The design tokens in `app/tokens.css` and SVG icons in `public/icons/`.
+Set the runtime variables from `.env.example` in Coolify. Tokens, session secret and Admin client secret must remain runtime secrets, never Docker build arguments or Git files. The Node process gets its own bounded TTL cache; no Oxygen runtime or deployment is required. MiniOxygen is retained only for the existing local development workflow.
 
-## Run it
+Start with an HTTPS preview domain. Verify catalog, product, cart, checkout redirect, policies, contact, newsletter and Customer Accounts before attaching `plainwellbody.com`. Register preview and production callback/logout origins in Shopify Customer Account settings. Email sign-in needs the user to complete its one-time code. Domain cutover is a separate rollout step.
 
-Requires Node.js 22 (22.12 or later) or Node.js 24.
+## Credentials
 
-```bash
-npm install
-```
+Use `SHOPIFY_ADMIN_CLIENT_ID` and `SHOPIFY_ADMIN_CLIENT_SECRET` for automatic 24-hour Admin token renewal. The legacy `SHOPIFY_ADMIN_API_TOKEN` fallback is optional and should be omitted for this app. Never prefix private credentials with `PUBLIC_`. `.env` is ignored by Git and excluded from Docker.
 
-**Zero-config demo** — runs against `mock.shop` (a public mock Storefront API, no
-account or token needed):
-
-```bash
-cp .env.example .env
-# uncomment MOCK_SHOP=1 in .env
-npm run dev
-```
-
-`mock.shop` is a catalog of fictional stores, each on its own host. The default at
-`mock.shop` sells apparel basics; the directory at
-[mock.shop/llms.txt](https://mock.shop/llms.txt) lists every other store with what it
-sells. To build against one of them, set `PUBLIC_STORE_DOMAIN` to its host (for
-example `pets.mock.shop`) and leave the token empty.
-
-**Against a real store** — link a Hydrogen storefront and pull its environment
-variables into `.env`, then run normally:
-
-```bash
-npx shopify hydrogen link       # skip if the project is already linked
-npx shopify hydrogen env pull   # writes the storefront's variables to .env
-npm run dev                     # Vite/Mini Oxygen loads .env into the worker environment
-```
-
-Oxygen creates `PUBLIC_STORE_DOMAIN`, `PUBLIC_STOREFRONT_ID`, and
-`PRIVATE_STOREFRONT_API_TOKEN` for a linked storefront, so you don't copy them by
-hand. If `env pull` reports secret values it couldn't pull, set those in `.env`. To
-use an existing **private** Storefront API token without linking, copy `.env.example`
-to `.env` and set `PUBLIC_STORE_DOMAIN` and `PRIVATE_STOREFRONT_API_TOKEN`.
-`PUBLIC_STOREFRONT_ID` is optional; providing it enables Shopify analytics for real
-stores.
-
-Customer Account OAuth requires trusted local HTTPS. Run:
-
-```bash
-npm run dev:https
-```
-
-Open <https://local.tryhydrogen.dev:5173>.
-
-The local HTTPS plugin provisions and reuses a trusted certificate under `~/.shopify/hydrogen/certs/` (on first run, it may prompt to install the local certificate authority), links an unlinked Hydrogen storefront, and pushes the Customer Account callback, JavaScript origin, and logout URLs. See the `hydrogen-local-https` skill for CI and manual fallback behavior.
-
-Mode is **auto-detected**: when a `PRIVATE_STOREFRONT_API_TOKEN` is present the
-app talks to the real store (`PUBLIC_STORE_DOMAIN`, falling back to the default in
-`app/lib/shop.ts`); with none it falls back to the `mock.shop` demo, so a fresh
-deploy always renders. **On Oxygen, a linked storefront injects these env vars
-automatically** — the deployed site connects to your store with no extra config
-(and shows the `mock.shop` demo until it's linked). `MOCK_SHOP=1` forces mock, and so
-does a `mock.shop` host in `PUBLIC_STORE_DOMAIN`.
-(`mock.shop` and the Hydrogen Preview store are different data sources.)
-
-## Announcement bar (optional)
-
-Add entries to `ANNOUNCEMENTS` in `app/components/AnnouncementBar.tsx`. An empty
-list hides the bar. Each entry's `content` is a React element, so it can include links:
-
-```tsx
-import { Link } from "react-router";
-
-const ANNOUNCEMENTS: Announcement[] = [
-  {
-    content: (
-      <p>
-        Discover our <Link to="/collections" className="underline">latest collections</Link>.
-      </p>
-    ),
-  },
-];
-```
-
-You can connect metafields or a CMS later with your own data loading and rendering.
-No specific metafield format is required.
-
-## Scripts
-
-| Script | Does |
-| --- | --- |
-| `npm run dev` | Start the Vite dev server with Mini Oxygen. |
-| `npm run dev:https` | Start the Vite dev server with trusted local HTTPS. |
-| `npm run build` | Production React Router build for Oxygen. |
-| `npm run preview` | Build and preview locally with Vite and Mini Oxygen. |
-| `npm run deploy` | Deploy to Oxygen with the Shopify CLI. |
-| `npm run typecheck` | React Router typegen + TypeScript + Hydrogen GraphQL checks. |
-
-## Where to start
-
-- Swap the store in `app/lib/shop.ts` + `.env`.
-- Routes live in `app/routes/`; shared UI in `app/components/`; data/query helpers
-  in `app/lib/`.
-- The design is yours to change — `app/tokens.css` holds the design tokens; the
-  components use them via semantic classes.
-
-## License
-
-MIT — see [LICENSE](./LICENSE).
+The existing product ingredient and journal placeholder content still needs approved copy. Contact messages are saved to Shopify customer notes with the `contact-form` tag; staff email notifications require a separate workflow.

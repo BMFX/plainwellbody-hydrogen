@@ -1,0 +1,13 @@
+.git
+node_modules
+dist
+build
+.react-router
+.shopify
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+.DS_Store
+.agents
+.claude

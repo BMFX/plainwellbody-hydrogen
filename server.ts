@@ -1,16 +1,17 @@
+import type { CacheInstance } from "@shopify/hydrogen";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 import * as serverBuild from "virtual:react-router/server-build";
 
 import { envContext } from "~/lib/env";
 
 /**
- * Export a fetch handler in module format for Oxygen / mini-oxygen.
+ * Export a Web fetch handler; the Node server supplies its cache and background context.
  */
 export default {
   async fetch(
     rawRequest: Request,
     env: Env,
-    executionContext: ExecutionContext,
+    executionContext: ExecutionContext & { cache?: CacheInstance },
   ): Promise<Response> {
     try {
       const request = toPublicRequest(rawRequest);
@@ -28,7 +29,7 @@ export default {
       }
 
       const routerContext = new RouterContextProvider();
-      routerContext.cache = await caches.open("hydrogen-v1");
+      routerContext.cache = executionContext.cache ?? await caches.open("hydrogen-v1");
       routerContext.set(envContext, env);
       routerContext.env = env;
       routerContext.waitUntil = executionContext.waitUntil.bind(executionContext);
