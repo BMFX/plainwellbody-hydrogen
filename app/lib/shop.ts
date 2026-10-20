@@ -1,96 +1,37 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Store configuration.
-//
-// Mode is auto-detected per request (see `shouldUseMockShop` below):
-//   • Real store — used automatically whenever a PRIVATE Storefront API token is
-//     present. On Oxygen, a linked storefront injects PRIVATE_STOREFRONT_API_TOKEN,
-//     PUBLIC_STORE_DOMAIN, and PUBLIC_STOREFRONT_ID; for local real-store dev set
-//     them in `.env`. PUBLIC_STOREFRONT_ID is optional; without it, Shopify
-//     analytics stay off.
-//   • mock.shop — the tokenless fallback used when no token is present (so a
-//     fresh deploy always renders), forced explicitly by MOCK_SHOP=1, and implied
-//     by a mock.shop host in PUBLIC_STORE_DOMAIN. mock.shop is many stores, each
-//     on its own host (directory: https://mock.shop/llms.txt); PUBLIC_STORE_DOMAIN
-//     picks one (e.g. pets.mock.shop), otherwise the default store at mock.shop.
-//
-// `storeDomain` below is the default used only when PUBLIC_STORE_DOMAIN is unset.
-// It points at Shopify's public Hydrogen Preview store as an EXAMPLE — replace it
-// or set PUBLIC_STORE_DOMAIN. (mock.shop is a different data source.)
+// Store configuration. The storefront reads one Shopify store, set by
+// PUBLIC_STORE_DOMAIN and PRIVATE_STOREFRONT_API_TOKEN in the runtime environment
+// (Coolify, or `.env` locally). PUBLIC_STOREFRONT_ID is optional; without it,
+// Shopify analytics stay off.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { ShopAnalytics, ShopifyScriptsShop } from "@shopify/hydrogen";
 
 export const storefrontConfig = {
-  storeDomain: "hydrogen-preview.myshopify.com", // ← default; or set PUBLIC_STORE_DOMAIN
   i18n: { country: "US", language: "EN" },
 } as const;
 
-// Real store iff a private Storefront API token is available and the store isn't
-// a mock.shop host; otherwise the tokenless mock.shop demo. MOCK_SHOP=1 forces
-// mock (used by the gate + as the zero-config default).
-export function shouldUseMockShop(
-  env: Pick<Env, "MOCK_SHOP" | "PRIVATE_STOREFRONT_API_TOKEN" | "PUBLIC_STORE_DOMAIN">,
-): boolean {
-  return (
-    env.MOCK_SHOP === "1" ||
-    !env.PRIVATE_STOREFRONT_API_TOKEN ||
-    isMockShopDomain(env.PUBLIC_STORE_DOMAIN)
-  );
-}
-
-// mock.shop is a catalog of stores, not one store. The default store at mock.shop
-// sells apparel basics; every other store lives on its own host (pets.mock.shop,
-// snowboards.mock.shop, ...) and is listed at https://mock.shop/llms.txt.
-export const MOCK_SHOP_DOMAIN = "mock.shop";
-
-export function isMockShopDomain(domain: string | undefined): domain is string {
-  return domain === MOCK_SHOP_DOMAIN || Boolean(domain?.endsWith(`.${MOCK_SHOP_DOMAIN}`));
-}
-
-// Store domain for mock mode: a mock.shop host in PUBLIC_STORE_DOMAIN selects that
-// store's catalog; anything else means the default store.
-export function getMockShopDomain(env: Pick<Env, "PUBLIC_STORE_DOMAIN">): string {
-  return isMockShopDomain(env.PUBLIC_STORE_DOMAIN) ? env.PUBLIC_STORE_DOMAIN : MOCK_SHOP_DOMAIN;
-}
-
-// Store domain for real-store mode: prefer the worker env (Oxygen injects
-// PUBLIC_STORE_DOMAIN for a linked storefront), else the configured default.
 export function getStoreDomain(env: Pick<Env, "PUBLIC_STORE_DOMAIN">): string {
-  return env.PUBLIC_STORE_DOMAIN || storefrontConfig.storeDomain;
+  if (!env.PUBLIC_STORE_DOMAIN) throw new Error("PUBLIC_STORE_DOMAIN is required (see .env.example).");
+  return env.PUBLIC_STORE_DOMAIN;
 }
 
 // Shop identity for Shopify scripts and analytics. The shop ID comes from the
 // Storefront API, the storefront ID from PUBLIC_STOREFRONT_ID, and the domain is
-// the one the storefront client queries. Only a real store with a storefront ID
-// loads Shopify's analytics (`hydrogen` channel); otherwise events stay local
-// (`headless`), and the empty script `storefrontId` means "none".
+// the one the storefront client queries. Only a storefront ID loads Shopify's
+// analytics (`hydrogen` channel); otherwise events stay local (`headless`), and
+// the empty script `storefrontId` means "none".
 export type ShopIdentity = {
   scriptShop: ShopifyScriptsShop;
   analyticsShop: ShopAnalytics;
   shopifyAnalytics: boolean;
 };
 
-export function resolveShopIdentity(
-  env: Pick<
-    Env,
-    "MOCK_SHOP" | "PRIVATE_STOREFRONT_API_TOKEN" | "PUBLIC_STORE_DOMAIN" | "PUBLIC_STOREFRONT_ID"
-  >,
-  shopId: string,
-): ShopIdentity {
-  if (shouldUseMockShop(env)) {
-    return {
-      scriptShop: { shopId, storefrontId: "", myshopifyDomain: getMockShopDomain(env) },
-      analyticsShop: { shopId, channel: "headless" },
-      shopifyAnalytics: false,
-    };
-  }
-
+export function resolveShopIdentity(env: Pick<Env, "PUBLIC_STORE_DOMAIN" | "PUBLIC_STOREFRONT_ID">, shopId: string): ShopIdentity {
   const storefrontId = env.PUBLIC_STOREFRONT_ID ?? "";
   return {
     scriptShop: { shopId, storefrontId, myshopifyDomain: getStoreDomain(env) },
-    analyticsShop: storefrontId
-      ? { shopId, channel: "hydrogen", storefrontId }
-      : { shopId, channel: "headless" },
+    analyticsShop: storefrontId ? { shopId, channel: "hydrogen", storefrontId } : { shopId, channel: "headless" },
     shopifyAnalytics: storefrontId !== "",
   };
 }
@@ -102,31 +43,22 @@ export const analyticsConsent = {
   language: "EN",
 } as const;
 
-// Private Storefront API token for SSR requests. Read from the worker environment
-// so a standalone clone supplies it via .env / Oxygen bindings. Never commit a
-// real token.
+// Private Storefront API token for SSR requests, from the runtime environment.
+// Never commit a real token.
 export function getPrivateStorefrontToken(env: Pick<Env, "PRIVATE_STOREFRONT_API_TOKEN">): string {
   const token = env.PRIVATE_STOREFRONT_API_TOKEN;
-  if (!token) {
-    throw new Error(
-      "PRIVATE_STOREFRONT_API_TOKEN is required for SSR requests against a real store. " +
-        "Set it in your environment (see .env.example), or run with MOCK_SHOP=1 for the tokenless mock.shop demo.",
-    );
-  }
+  if (!token) throw new Error("PRIVATE_STOREFRONT_API_TOKEN is required (see .env.example).");
   return token;
 }
 
-// Buyer IP for private Storefront clients (Shopify uses it for bot/abuse
-// signals). Returns the first trusted forwarded IP; falls back to localhost in
-// development and throws in production when none is present.
-const BUYER_IP_HEADERS = ["oxygen-buyer-ip", "cf-connecting-ip", "x-forwarded-for"] as const;
+// Buyer IP for the private Storefront client (Shopify uses it for bot/abuse
+// signals). The Node server (scripts/runtime.mjs) sets x-forwarded-for to the
+// trusted buyer IP; development falls back to localhost.
 export const DEVELOPMENT_BUYER_IP = "127.0.0.1";
 
 export function getBuyerIp(headers: Pick<Headers, "get">): string {
-  for (const header of BUYER_IP_HEADERS) {
-    const ip = headers.get(header)?.split(",")[0]?.trim();
-    if (ip) return ip;
-  }
+  const ip = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (ip) return ip;
   if (process.env.NODE_ENV !== "production") return DEVELOPMENT_BUYER_IP;
-  throw new Error(`${BUYER_IP_HEADERS.join(", ")} is required for private Storefront API clients`);
+  throw new Error("x-forwarded-for is required for the private Storefront API client");
 }

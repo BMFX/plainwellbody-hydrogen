@@ -17,7 +17,8 @@ export const rich = (text) => ({ $rich: text });
 export const page = (handle) => ({ $page: handle });
 export const collection = (handle) => ({ $collection: handle });
 
-/** Images to upload to Shopify Files: name → source file (repo-relative) and alt text. */
+/** Images to upload to Shopify Files: name → source file (relative to the BMFX/plainwellbody
+ * checkout; see ASSETS_REPO in admin.mjs) and alt text. */
 export const IMAGES = {
   "citrus-bathhouse": { file: "assets/campaign/citrus-bathhouse.webp", alt: "Citrus Body Wash on a wet stone ledge beside halved lemons in morning light" },
   "botanical-bathhouse": { file: "assets/campaign/botanical-bathhouse.webp", alt: "Cedar Body Wash on a wet stone ledge in green morning light" },

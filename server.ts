@@ -1,18 +1,14 @@
-import type { CacheInstance } from "@shopify/hydrogen";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 import * as serverBuild from "virtual:react-router/server-build";
 
 import { envContext } from "~/lib/env";
 
 /**
- * Export a Web fetch handler; the Node server supplies its cache and background context.
+ * A Web fetch handler. scripts/serve.mjs (production) and the Vite plugin in
+ * vite.config.ts (development) call it with the environment, a cache and waitUntil.
  */
 export default {
-  async fetch(
-    rawRequest: Request,
-    env: Env,
-    executionContext: ExecutionContext & { cache?: CacheInstance },
-  ): Promise<Response> {
+  async fetch(rawRequest: Request, env: Env, context: ServerContext): Promise<Response> {
     try {
       const request = toPublicRequest(rawRequest);
       const method = request.method;
@@ -29,10 +25,10 @@ export default {
       }
 
       const routerContext = new RouterContextProvider();
-      routerContext.cache = executionContext.cache ?? await caches.open("hydrogen-v1");
+      routerContext.cache = context.cache;
       routerContext.set(envContext, env);
       routerContext.env = env;
-      routerContext.waitUntil = executionContext.waitUntil.bind(executionContext);
+      routerContext.waitUntil = context.waitUntil;
 
       const handleRequest = createRequestHandler(serverBuild, process.env.NODE_ENV);
       return handleRequest(request, routerContext as never);

@@ -15,7 +15,7 @@ import path from "node:path";
 
 import sharp from "sharp";
 
-import { admin, check, HYDROGEN, REPO, scopes } from "./admin.mjs";
+import { admin, check, ROOT, scopes } from "./admin.mjs";
 import { ensureModel } from "./model.mjs";
 import * as SEED from "./seed/content.mjs";
 import { TEXT } from "./seed/text.mjs";
@@ -230,13 +230,15 @@ export const OPS = {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
+/** The BMFX/plainwellbody checkout, which holds the brand photography the seed uploads. */
+let ASSETS_REPO = "";
 let SITE = ""; // https://<store>.myshopify.com: absolute URLs for link fields; the storefront makes them relative.
 const abs = (to) => (/^https?:/.test(to) ? to : `${SITE}${to}`);
 const log = (...a) => console.log(...a);
 const plan = (what) => log(`  ${APPLY ? "+" : "·"} ${what}${APPLY ? "" : " (would create)"}`);
 
 async function readEnv() {
-  const text = await readFile(path.join(HYDROGEN, ".env"), "utf8");
+  const text = await readFile(path.join(ROOT, ".env"), "utf8");
   return Object.fromEntries(
     text
       .split("\n")
@@ -334,7 +336,7 @@ async function findPublication() {
 }
 
 async function imageBuffer(name, spec) {
-  const src = path.join(REPO, spec.file);
+  const src = path.join(ASSETS_REPO, spec.file);
   if (spec.make === "trim") return { data: await sharp(src).trim().png({ compressionLevel: 9 }).toBuffer(), ext: "png", mime: "image/png" };
   if (spec.make === "share") {
     const data = await sharp(src).resize({ width: 1200, height: 630, fit: "cover", position: "attention" }).jpeg({ quality: 82, mozjpeg: true }).toBuffer();
@@ -372,7 +374,9 @@ async function ensureFile(name, spec) {
   const re = new RegExp(`/${base}(_[^/.]+)?\\.\\w+(\\?|$)`);
   const existing = nodes.find((n) => n.image?.url && re.test(n.image.url));
   if (existing) return existing.id;
-  await stat(path.join(REPO, spec.file));
+  await stat(path.join(ASSETS_REPO, spec.file)).catch(() => {
+    throw new Error(`Seed image ${spec.file} not found in ${ASSETS_REPO}. Set PLAINWELL_REPO to the BMFX/plainwellbody checkout.`);
+  });
   if (!APPLY) {
     plan(`image ${base}`);
     return null;
@@ -470,6 +474,7 @@ async function main() {
   const env = await readEnv();
   SITE = `https://${env.PUBLIC_STORE_DOMAIN}`;
   PUBLICATION = process.env.PW_PUBLICATION ?? env.PW_PUBLICATION ?? PUBLICATION;
+  ASSETS_REPO = path.resolve(ROOT, process.env.PLAINWELL_REPO ?? env.PLAINWELL_REPO ?? "../plainwell");
   log(APPLY ? `Applying to ${env.PUBLIC_STORE_DOMAIN}${OVERWRITE ? " (overwriting existing entries)" : ""}` : `Checking ${env.PUBLIC_STORE_DOMAIN} (read-only; --apply to write)`);
   await checkScopes();
 

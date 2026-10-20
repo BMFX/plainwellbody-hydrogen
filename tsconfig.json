@@ -28,7 +28,7 @@
     "allowJs": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["@shopify/oxygen-workers-types", "node", "react-router", "vite/client"],
+    "types": ["node", "react-router", "vite/client"],
     "paths": {
       "~/*": ["./app/*"]
     },

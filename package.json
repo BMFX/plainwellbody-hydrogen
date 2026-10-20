@@ -4,10 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "react-router build",
-    "deploy": "echo \"Deploy BMFX/plainwellbody-hydrogen through Coolify using the Dockerfile.\"",
-    "dev": "hydrogen skills check --mode=warn && vite dev",
-    "dev:https": "hydrogen skills check --mode=warn && vite dev",
-    "preview": "react-router build && vite preview",
+    "dev": "vite dev",
+    "dev:https": "vite dev",
+    "preview": "react-router build && npm start",
     "typecheck": "react-router typegen && tsc && hydrogen gql check --fail-on-warn && node scripts/shopify/validate-queries.mjs",
     "shopify:setup": "node scripts/shopify/setup.mjs",
     "start": "node --env-file-if-exists=.env scripts/serve.mjs",
@@ -27,8 +26,6 @@
   "devDependencies": {
     "@react-router/dev": "7.15.1",
     "@shopify/cli": "4.8.1",
-    "@shopify/mini-oxygen": "4.2.3",
-    "@shopify/oxygen-workers-types": "^4.1.6",
     "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^22",
     "@types/react": "^19.2.14",

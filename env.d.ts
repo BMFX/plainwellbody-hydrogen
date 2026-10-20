@@ -1,22 +1,25 @@
 /// <reference types="vite/client" />
 /// <reference types="react-router" />
-/// <reference types="@shopify/oxygen-workers-types" />
 
 import type { CacheInstance } from "@shopify/hydrogen";
 
 import type { Env as AppEnv } from "./app/lib/env";
 
-type ReactRouterExampleContext = {
+type RequestContext = {
   cache: CacheInstance;
   env: Env;
-  waitUntil: ExecutionContext["waitUntil"];
+  waitUntil: WaitUntil;
 };
 
 declare module "react-router" {
-  interface AppLoadContext extends ReactRouterExampleContext {}
-  interface RouterContextProvider extends ReactRouterExampleContext {}
+  interface AppLoadContext extends RequestContext {}
+  interface RouterContextProvider extends RequestContext {}
 }
 
 declare global {
   interface Env extends AppEnv {}
+  /** Keeps background work (cache refreshes, analytics) running after the response. */
+  type WaitUntil = (promise: Promise<unknown>) => void;
+  /** What the Node server passes to server.ts for each request. */
+  type ServerContext = { cache: CacheInstance; waitUntil: WaitUntil };
 }

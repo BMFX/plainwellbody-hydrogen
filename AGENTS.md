@@ -1,14 +1,12 @@
-# Shopify Hydrogen development
+# Plainwell storefront development
 
-This storefront is scaffolded from Shopify's Hydrogen React Router template. See the README for framework-specific details.
+A Shopify Hydrogen / React Router storefront, served by Node (`scripts/serve.mjs` in
+production on Coolify, the Vite plugin in `vite.config.ts` in development). See the
+README for scripts and deployment.
 
 Use the [Shopify AI Toolkit](https://shopify.dev/docs/apps/build/ai-toolkit) for all Shopify API and platform work. If missing, install it in the agent host per that page (or `npx skills add Shopify/shopify-ai-toolkit --list` for skill-compatible hosts).
 
-## No store yet?
-
-Until a store is connected, this project reads [mock.shop](https://mock.shop): a public, auth-free Storefront API backed by fictional stores. There are more than 100 sample stores, each on its own host with its own catalog.
-
-- The directory at https://mock.shop/llms.txt lists every store with what it sells and its API URL. The default, `mock.shop` itself, is apparel basics.
-- To build against a different store, set `PUBLIC_STORE_DOMAIN` in `.env` to that store's host (for example `pets.mock.shop`) and leave `PRIVATE_STOREFRONT_API_TOKEN` empty. Each store describes its own catalog at `https://<store>.mock.shop/llms.txt`.
-- Carts work; checkout is mocked (no payment, no real order), and the Customer Account API isn't available.
-- To connect a real store, run `npx shopify hydrogen link`, then `npx shopify hydrogen env pull` to pull its environment into `.env`. Fill in any secret values the command reports it couldn't pull. On Oxygen, a linked storefront injects `PUBLIC_STORE_DOMAIN`, `PUBLIC_STOREFRONT_ID`, and `PRIVATE_STOREFRONT_API_TOKEN` for you. `PUBLIC_STOREFRONT_ID` is optional for Storefront API access; it enables Hydrogen analytics, and no other analytics IDs are needed.
+- All content comes from Shopify (metaobjects, metafields, menus, Site settings). Don't
+  add copy, images or fallbacks to the code; if Shopify has nothing, render nothing.
+- New interface text goes in `scripts/shopify/seed/text.mjs` and in Shopify.
+- Ingredient, formula and policy details are fictional-demo placeholders; keep them that way.

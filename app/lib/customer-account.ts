@@ -11,7 +11,6 @@ import { createContext } from "react-router";
 
 import type { Env } from "~/lib/env";
 import { createRequestSessionManager } from "~/lib/session";
-import { shouldUseMockShop } from "~/lib/shop";
 
 export type CustomerAccount = {
   client: CustomerAccountClient;
@@ -47,7 +46,7 @@ export async function createRequestCustomerAccount(
     PUBLIC_CUSTOMER_ACCOUNT_API_CLIENT_ID: customerAccountApiClientId,
     SESSION_SECRET: sessionSecret,
   } = env;
-  if (shouldUseMockShop(env) || !shopId || !customerAccountApiClientId || !sessionSecret) return;
+  if (!shopId || !customerAccountApiClientId || !sessionSecret) return;
   if (new URL(request.url).protocol !== "https:") return;
 
   const key = `${shopId}:${customerAccountApiClientId}`;

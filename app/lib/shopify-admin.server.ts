@@ -1,8 +1,8 @@
 // Server-only Shopify Admin API access for the newsletter and contact forms.
 //
 // Uses a Dev Dashboard app with read_customers/write_customers access. Set
-// SHOPIFY_ADMIN_CLIENT_ID and SHOPIFY_ADMIN_CLIENT_SECRET in .env and Oxygen;
-// tokens are renewed automatically. Legacy apps may use SHOPIFY_ADMIN_API_TOKEN.
+// SHOPIFY_ADMIN_CLIENT_ID and SHOPIFY_ADMIN_CLIENT_SECRET in .env and Coolify;
+// tokens are renewed automatically.
 // The `.server` suffix keeps this module, and the token, out of the browser bundle.
 //
 // Operations validated against the Admin GraphQL schema, version 2026-10.
@@ -20,7 +20,8 @@ export class AdminNotConfiguredError extends Error {
 
 export function isAdminConfigured(env: Env) {
   return Boolean(
-    (env.SHOPIFY_ADMIN_API_TOKEN || (env.SHOPIFY_ADMIN_CLIENT_ID && env.SHOPIFY_ADMIN_CLIENT_SECRET)) &&
+    env.SHOPIFY_ADMIN_CLIENT_ID &&
+      env.SHOPIFY_ADMIN_CLIENT_SECRET &&
       env.PUBLIC_STORE_DOMAIN?.endsWith(".myshopify.com"),
   );
 }
@@ -31,7 +32,6 @@ let pendingAdminToken: { key: string; promise: Promise<string> } | null = null;
 
 async function getAdminAccessToken(env: Env): Promise<string> {
   if (!isAdminConfigured(env)) throw new AdminNotConfiguredError();
-  if (!env.SHOPIFY_ADMIN_CLIENT_ID || !env.SHOPIFY_ADMIN_CLIENT_SECRET) return env.SHOPIFY_ADMIN_API_TOKEN!;
   const key = JSON.stringify([env.PUBLIC_STORE_DOMAIN, env.SHOPIFY_ADMIN_CLIENT_ID, env.SHOPIFY_ADMIN_CLIENT_SECRET]);
   if (adminTokenCache?.key === key && Date.now() < adminTokenCache.expiresAt - 60_000) return adminTokenCache.token;
   if (pendingAdminToken?.key === key) return pendingAdminToken.promise;

@@ -8,11 +8,11 @@ import { existsSync, readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { HYDROGEN } from "./admin.mjs";
+import { ROOT } from "./admin.mjs";
 
 const FILES = ["app/lib/content.ts", "app/lib/pages.ts", "app/lib/collections.ts"];
 const QUERIES = ["SITE_CONTENT_QUERY", "PAGE_QUERY", "HOME_PAGE_QUERY", "COLLECTION_SECTIONS_QUERY"];
-const VALIDATOR = path.join(HYDROGEN, ".agents/skills/shopify/scripts/validate.mjs");
+const VALIDATOR = path.join(ROOT, ".agents/skills/shopify/scripts/validate.mjs");
 const VERSION = "2026-10";
 
 if (!existsSync(VALIDATOR)) {
@@ -23,7 +23,7 @@ if (!existsSync(VALIDATOR)) {
 // Collect every string constant: `const NAME = \`...\`` and `const NAME = [A, B].join("\n")`.
 const raw = {};
 for (const file of FILES) {
-  const source = readFileSync(path.join(HYDROGEN, file), "utf8");
+  const source = readFileSync(path.join(ROOT, file), "utf8");
   for (const m of source.matchAll(/const (\w+)(?:: string)? = `([\s\S]*?)`;/g)) raw[m[1]] = m[2];
   for (const m of source.matchAll(/const (\w+)(?:: string)? = \[([\w\s,]+)\]\.join\("\\n"\);/g)) {
     raw[m[1]] = m[2]
