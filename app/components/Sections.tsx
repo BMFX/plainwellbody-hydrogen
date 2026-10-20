@@ -65,20 +65,22 @@ function Hero({ e, first }: { e: Entry; first: boolean }) {
     <section className="bg-olive relative h-[560px] overflow-hidden md:h-[760px]">
       <ShopifyImage image={e.image("image")} sizes="100vw" priority={first} className="absolute inset-0 h-full w-full object-cover object-[78%_50%] md:object-[62%_50%]" />
       <div aria-hidden="true" className="pw-hero-scrim absolute inset-0" />
-      <div className="pw-gutter absolute inset-x-0 bottom-12 flex max-w-[640px] flex-col gap-5 text-white md:bottom-16">
-        {e.text("eyebrow") ? <span className="text-xs tracking-[0.14em] uppercase">{e.text("eyebrow")}</span> : null}
-        {heading ? (
-          <Heading first={first} className="pw-display-xl">
-            <Lines text={heading} />
-          </Heading>
-        ) : null}
-        {e.text("body") ? <p className="max-w-[420px] text-base leading-relaxed text-[#f1eee6]">{e.text("body")}</p> : null}
-        {e.link("primary_link") || e.link("secondary_link") ? (
-          <div className="flex flex-wrap gap-3">
-            <LinkButton link={e.link("primary_link")} className="pw-btn pw-btn--light" />
-            <LinkButton link={e.link("secondary_link")} className="pw-btn pw-btn--outline-light" />
-          </div>
-        ) : null}
+      <div className="pw-gutter absolute inset-x-0 bottom-12 md:bottom-16">
+        <div className="flex max-w-[calc(640px-2*var(--spacing-gutter))] flex-col gap-5 text-white">
+          {e.text("eyebrow") ? <span className="text-xs tracking-[0.14em] uppercase">{e.text("eyebrow")}</span> : null}
+          {heading ? (
+            <Heading first={first} className="pw-display-xl">
+              <Lines text={heading} />
+            </Heading>
+          ) : null}
+          {e.text("body") ? <p className="max-w-[420px] text-base leading-relaxed text-[#f1eee6]">{e.text("body")}</p> : null}
+          {e.link("primary_link") || e.link("secondary_link") ? (
+            <div className="flex flex-wrap gap-3">
+              <LinkButton link={e.link("primary_link")} className="pw-btn pw-btn--light" />
+              <LinkButton link={e.link("secondary_link")} className="pw-btn pw-btn--outline-light" />
+            </div>
+          ) : null}
+        </div>
       </div>
     </section>
   );
@@ -227,7 +229,7 @@ function Feature({ e }: { e: Entry }) {
   return (
     <section className="bg-olive relative overflow-hidden md:h-[680px]">
       <ShopifyImage image={e.image("image")} sizes="100vw" className="block h-[320px] w-full object-cover md:absolute md:inset-0 md:h-full" />
-      <div className="bg-paper relative flex flex-col gap-3.5 p-8 md:absolute md:right-[var(--spacing-gutter)] md:bottom-12 md:w-[400px]">
+      <div className="bg-paper relative flex flex-col gap-3.5 p-8 md:absolute md:right-[var(--spacing-edge)] md:bottom-12 md:w-[400px]">
         {e.text("eyebrow") ? <span className="pw-eyebrow">{e.text("eyebrow")}</span> : null}
         {e.text("heading") ? <h2 className="pw-title">{e.text("heading")}</h2> : null}
         <ul role="list" className="border-line flex flex-col border-t">
@@ -292,7 +294,7 @@ function Points({ e }: { e: Entry }) {
   const items = e.entries("items");
   return (
     <section className="border-line border-y">
-      <ul role="list" className="grid sm:grid-cols-2 lg:grid-cols-4">
+      <ul role="list" className="pw-contain grid sm:grid-cols-2 lg:grid-cols-4">
         {items.map((item) => (
           <li
             key={item.id}
@@ -411,14 +413,16 @@ function Faq({ e }: { e: Entry }) {
 
 function Article({ e }: { e: Entry }) {
   return (
-    <article className="pw-gutter mx-auto flex max-w-[856px] flex-col gap-12 py-24">
-      {e.entries("items").map((item) => (
-        <div key={item.id} className="flex flex-col gap-3.5">
-          {item.text("title") ? <h2 className="pw-title">{item.text("title")}</h2> : null}
-          <RichText node={item.rich("body")} paragraphClassName="text-[17px] leading-[1.75]" className="flex flex-col gap-4" />
-        </div>
-      ))}
-      <LinkButton link={e.link("link")} className="pw-btn pw-btn--primary self-start" />
+    <article className="pw-gutter py-24">
+      <div className="mx-auto flex max-w-[calc(856px-2*var(--spacing-gutter))] flex-col gap-12">
+        {e.entries("items").map((item) => (
+          <div key={item.id} className="flex flex-col gap-3.5">
+            {item.text("title") ? <h2 className="pw-title">{item.text("title")}</h2> : null}
+            <RichText node={item.rich("body")} paragraphClassName="text-[17px] leading-[1.75]" className="flex flex-col gap-4" />
+          </div>
+        ))}
+        <LinkButton link={e.link("link")} className="pw-btn pw-btn--primary self-start" />
+      </div>
     </article>
   );
 }
@@ -453,7 +457,7 @@ function Contact({ e, context }: { e: Entry; context: SectionContext }) {
   const topics = e.entries("items");
 
   return (
-    <section className="border-line grid items-start border-t md:grid-cols-2">
+    <section className="border-line pw-contain grid items-start border-t md:grid-cols-2">
       <ol className="pw-gutter border-line flex flex-col pt-12 pb-[72px] md:border-r">
         {topics.map((topic, i) => (
           <li key={topic.id} className="border-line grid grid-cols-[48px_1fr] gap-3 border-b py-[18px]">

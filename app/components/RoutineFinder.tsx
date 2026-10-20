@@ -84,7 +84,7 @@ export function RoutineFinder({ section, data }: { section: Entry; data: Routine
 function HouseholdStep({ state, section }: { state: RoutineState; section: Entry }) {
   const t = useText();
   return (
-    <section className="border-line mt-7 grid border-t lg:grid-cols-2">
+    <section className="border-line pw-contain mt-7 grid border-t lg:grid-cols-2">
       <Form method="get" preventScrollReset className="pw-gutter flex flex-col gap-8 pt-14 pb-20 md:pt-[72px]">
         <Hidden values={{ scent: state.routine }} />
         <div className="flex flex-col gap-3.5">
@@ -194,7 +194,7 @@ function RoutineStep({ data, section }: { data: RoutineFinderData; section: Entr
   const essentials = t(count === 1 ? "finder.count_one" : "finder.count_other", { count });
 
   return (
-    <section className="border-line mt-7 grid items-start border-t lg:grid-cols-2">
+    <section className="border-line pw-contain mt-7 grid items-start border-t lg:grid-cols-2">
       <div className="pw-gutter border-line flex min-w-0 flex-col gap-2 pt-16 pb-[72px] lg:border-r">
         <span className="pw-eyebrow">{t("finder.routine.eyebrow")}</span>
         <h1 className="pt-1.5 pb-1 text-[clamp(36px,3.8vw,48px)] leading-[1.06] tracking-[-0.02em]">{t(`finder.routine.title.${state.household}`)}</h1>

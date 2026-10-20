@@ -110,6 +110,14 @@
   --spacing-page: 80rem;
   --spacing-margin: 1.25rem;
   --spacing-gutter: clamp(20px, 3.5vw, 48px);
+  /* Content stays within this width on ultrawide screens; photographs and section
+     backgrounds still run edge to edge. */
+  --spacing-content: 1800px;
+  /* Inline padding: the gutter, measured from the edge of a centered
+     --spacing-content band, so wide screens look like a 1800px window. The
+     percentage resolves against the element's containing block, so columns
+     narrower than the content width keep the plain gutter. */
+  --spacing-edge: calc(max(0px, (100% - var(--spacing-content)) / 2) + var(--spacing-gutter));
   --spacing-section: 112px;
   --spacing-control-height: 3rem;
   --spacing-header: 84px;

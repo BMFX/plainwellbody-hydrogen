@@ -860,7 +860,7 @@ function ProductPage({ data }: { data: View }) {
           {product.title}
         </span>
       </nav>
-      <section className="border-line grid items-start border-t md:grid-cols-2">
+      <section className="border-line pw-contain grid items-start border-t md:grid-cols-2">
         <div className="bg-shelf border-line aspect-[4/5] md:col-start-1 md:row-start-1 md:border-r">
           {image ? (
             <img

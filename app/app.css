@@ -175,7 +175,15 @@ body:has(.drawer-left[open]) {
     }
   }
   .pw-gutter {
-    padding-inline: var(--spacing-gutter);
+    padding-inline: var(--spacing-edge);
+  }
+  /* Multi-column layouts (product, bag, finder, contact) held to the content width. */
+  .pw-contain {
+    max-width: var(--spacing-content);
+    margin-inline: auto;
+    /* Its top and bottom hairlines still run edge to edge, like every other rule
+       (an outset border image is drawn, not laid out, so it adds no scroll). */
+    border-image: linear-gradient(var(--color-line) 0 0) 1 / 1 0 / 0 100vw;
   }
   .pw-eyebrow {
     font-size: 12px;
@@ -295,6 +303,8 @@ body:has(.drawer-left[open]) {
      card, so a row's buttons line up. */
   .pw-grid {
     display: grid;
+    max-width: var(--spacing-content);
+    margin-inline: auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     border-top: 1px solid var(--color-line);
     border-left: 1px solid var(--color-line);

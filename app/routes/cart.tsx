@@ -66,7 +66,7 @@ export default function CartRoute() {
         </span>
       </section>
 
-      <section className="grid items-start lg:grid-cols-[minmax(0,1fr)_minmax(380px,560px)]">
+      <section className="pw-contain grid items-start lg:grid-cols-[minmax(0,1fr)_minmax(380px,560px)]">
         <div className="pw-gutter border-line min-w-0 lg:border-r">
           {loading ? <p className="text-muted py-24">{t("bag.loading")}</p> : null}
           {!loading && lines.length === 0 ? (
