@@ -12,6 +12,7 @@ import { Link, useNavigate } from "react-router";
 import { SEARCH_DRAWER_ID, closeSearchDrawer } from "~/lib/cart-drawer";
 import { formatPrice } from "~/lib/money";
 import { describeSuggestions } from "~/lib/predictive-search";
+import { useText } from "~/lib/text";
 import { routeTemplates } from "~/lib/route-templates";
 
 const SEARCH_PAGE_PATH = "/search";
@@ -28,6 +29,7 @@ export function SearchDrawer() {
 }
 
 function SearchDialog() {
+  const t = useText();
   const navigate = useNavigate();
   const { clear } = usePredictiveSearchActions();
   const { formProps, register } = usePredictiveSearchForm();
@@ -51,7 +53,7 @@ function SearchDialog() {
       <div className="flex h-full flex-col">
         <div className="flex shrink-0 items-center gap-2 py-2 ps-4 pe-2">
           <h2 id={TITLE_ID} className="sr-only">
-            Search
+            {t("nav.search")}
           </h2>
           <form
             {...formProps({
@@ -65,7 +67,7 @@ function SearchDialog() {
             })}
           >
             <label htmlFor={INPUT_ID} className="sr-only">
-              Search products
+              {t("search.input_label")}
             </label>
             <span
               className="text-on-surface-secondary pointer-events-none absolute start-3 top-1/2 inline-flex size-5 -translate-y-1/2"
@@ -77,7 +79,7 @@ function SearchDialog() {
               ref={inputRef}
               {...register("query", {
                 id: INPUT_ID,
-                placeholder: "Search",
+                placeholder: t("nav.search"),
                 "aria-controls": RESULTS_ID,
                 className: "h-11 w-full ps-10",
                 onKeyDown: (event) => {
@@ -95,7 +97,7 @@ function SearchDialog() {
             commandfor={SEARCH_DRAWER_ID}
             command="close"
             className="button-icon focus-visible:outline-accent inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-safe:transition-[color,background-color,border-color,transform] motion-safe:active:scale-[0.97]"
-            aria-label="Close"
+            aria-label={t("nav.close")}
             onClick={() => closeSearchDrawer()}
           >
             <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" loading="lazy" />
@@ -108,13 +110,14 @@ function SearchDialog() {
 }
 
 function SearchSuggestions() {
+  const t = useText();
   const state = usePredictiveSearch();
   const { status, result, term } = state;
 
   return (
     <div id={RESULTS_ID} className="flex-1 overflow-y-auto p-4" aria-busy={status === "loading"}>
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        {describeSuggestions(state)}
+        {describeSuggestions(state, t)}
       </p>
       <SuggestionsBody status={status} result={result} />
       {term.length > 0 ? (
@@ -123,7 +126,7 @@ function SearchSuggestions() {
           className="text-on-surface focus-visible:outline-accent mt-4 inline-flex min-h-11 items-center text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
           onClick={() => closeSearchDrawer()}
         >
-          View all results for “{term}”
+          {t("search.drawer.view_all", { term })}
         </Link>
       ) : null}
     </div>
@@ -133,23 +136,24 @@ function SearchSuggestions() {
 type SuggestionsBodyProps = Pick<PredictiveSearchState, "status" | "result">;
 
 function SuggestionsBody({ status, result }: SuggestionsBodyProps) {
+  const t = useText();
   switch (status) {
     case "idle":
       return null;
     case "error":
       return (
         <p role="alert" className="text-critical text-sm">
-          Suggestions are unavailable right now. Use the full search page instead.
+          {t("search.drawer.unavailable")}
         </p>
       );
     case "loading":
       if (result.items.products.length === 0) {
-        return <p className="text-on-surface-secondary text-sm">Searching…</p>;
+        return <p className="text-on-surface-secondary text-sm">{t("search.drawer.searching")}</p>;
       }
       return <SuggestionList products={result.items.products} term={result.term} stale />;
     case "success":
       if (result.items.products.length === 0) {
-        return <p className="text-on-surface-secondary text-sm">No results for “{result.term}”</p>;
+        return <p className="text-on-surface-secondary text-sm">{t("search.drawer.no_results", { term: result.term })}</p>;
       }
       return <SuggestionList products={result.items.products} term={result.term} />;
   }

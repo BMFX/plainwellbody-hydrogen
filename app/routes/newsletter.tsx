@@ -1,6 +1,9 @@
 import { data, redirect } from "react-router";
 
+import { clientT } from "~/lib/client-text";
+import { format, loadSiteContent } from "~/lib/content";
 import { envContext } from "~/lib/env";
+import { storefrontClientContext } from "~/lib/storefront";
 import { looksAutomated, readEmail, type FormResult } from "~/lib/forms";
 import { AdminNotConfiguredError, subscribeToNewsletter } from "~/lib/shopify-admin.server";
 
@@ -20,9 +23,11 @@ export async function action({ context, request }: Route.ActionArgs) {
   };
 
   const { email, valid } = readEmail(form);
+  const site = await loadSiteContent(context.get(storefrontClientContext));
+  const t = (key: string) => format(site.text, key);
   if (!valid) {
     if (nativeSubmit) return back("invalid");
-    return data<FormResult<"email">>({ ok: false, errors: { email: "Enter a valid email address." } }, { status: 400 });
+    return data<FormResult<"email">>({ ok: false, errors: { email: t("form.error.email") } }, { status: 400 });
   }
   if (looksAutomated(form)) return nativeSubmit ? back("subscribed") : data<FormResult>({ ok: true });
 
@@ -36,15 +41,23 @@ export async function action({ context, request }: Route.ActionArgs) {
       {
         ok: false,
         errors: {
-          form: notConfigured
-            ? "Sign-up isn’t connected yet. Please try again soon."
-            : "We couldn’t sign you up just now. Please try again.",
+          form: t(notConfigured ? "newsletter.error.unavailable" : "newsletter.error.failed"),
         },
       },
       { status: notConfigured ? 503 : 502 },
     );
   }
   return nativeSubmit ? back("subscribed") : data<FormResult>({ ok: true });
+}
+
+// Keeps the footer form in place with a message when the connection drops.
+export async function clientAction({ serverAction }: Route.ClientActionArgs) {
+  try {
+    return await serverAction();
+  } catch (error) {
+    if (error instanceof Response) throw error;
+    return { ok: false as const, errors: { form: clientT("form.error.offline") } };
+  }
 }
 
 export function loader() {

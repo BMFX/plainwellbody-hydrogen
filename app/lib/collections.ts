@@ -1,49 +1,124 @@
-import { gql, type StorefrontApi } from "@shopify/hydrogen";
-import type { StorefrontClient } from "@shopify/hydrogen";
+import { Cache, gql } from "@shopify/hydrogen";
 
-import { COLLECTION_CARD_FRAGMENT } from "~/components/CollectionCard";
+import { cardFromProduct, PRODUCT_CARD_FRAGMENT, type CardItem } from "~/components/ProductCard";
+import { hydrateProducts, normalizeLinks, SECTION_FRAGMENTS, storeHosts, untypedQuery } from "~/lib/content";
+import type { RequestStorefrontClient } from "~/lib/storefront";
 
-export const COLLECTIONS_PAGE_SIZE = 12;
+// Collections, all from Shopify. /collections/all shows the collection chosen in Site
+// settings › Shop all collection.
 
-export const COLLECTIONS_QUERY = gql(
+export const COLLECTION_QUERY = gql(
   `
-    query CollectionsList($first: Int!, $after: String) {
-      collections(first: $first, after: $after) {
-        pageInfo {
-          hasNextPage
-          endCursor
+    query PlainwellCollection($handle: String!, $sortKey: ProductCollectionSortKeys!, $reverse: Boolean!) {
+      shop {
+        primaryDomain {
+          host
         }
-        nodes {
-          ...CollectionCard
+      }
+      collection(handle: $handle) {
+        id
+        handle
+        title
+        description
+        image {
+          url
+          altText
+          width
+          height
+        }
+        seo {
+          title
+          description
+        }
+        eyebrow: metafield(namespace: "plainwell", key: "eyebrow") {
+          value
+        }
+        products(first: 250, sortKey: $sortKey, reverse: $reverse) {
+          nodes {
+            ...ProductCard
+          }
         }
       }
     }
   `,
-  [COLLECTION_CARD_FRAGMENT],
+  [PRODUCT_CARD_FRAGMENT],
 );
 
-type CollectionsQueryVariables = StorefrontApi.VariablesOf<typeof COLLECTIONS_QUERY>;
+// The collection's sections (below the products), as a plain-string query; see content.ts.
+const COLLECTION_SECTIONS_QUERY: string = `
+  query PlainwellCollectionSections($handle: String!) {
+    collection(handle: $handle) {
+      sections: metafield(namespace: "plainwell", key: "sections") {
+        references(first: 10) {
+          nodes {
+            __typename
+            ... on Metaobject {
+              ...PwSection
+            }
+          }
+        }
+      }
+    }
+  }
+  ${SECTION_FRAGMENTS}
+`;
 
-export async function loadCollectionsPage({
-  storefrontClient,
-  request,
-}: {
-  storefrontClient: StorefrontClient;
-  request: Request;
-}) {
-  const url = new URL(request.url);
-  const variables: CollectionsQueryVariables = {
-    first: COLLECTIONS_PAGE_SIZE,
-    after: url.searchParams.get("after") || null,
+export const SHOP_ALL_QUERY = gql(`
+  query PlainwellShopAll {
+    settings: metaobject(handle: { type: "pw_settings", handle: "site" }) {
+      shopAll: field(key: "shop_all") {
+        reference {
+          ... on Collection {
+            handle
+          }
+        }
+      }
+    }
+  }
+`);
+
+type Client = Pick<RequestStorefrontClient, "graphql">;
+
+export type SortKey = "featured" | "price-asc" | "price-desc";
+export const SORTS: SortKey[] = ["featured", "price-asc", "price-desc"];
+export function parseSort(value: string | null): SortKey {
+  return SORTS.includes(value as SortKey) ? (value as SortKey) : "featured";
+}
+
+export async function shopAllHandle(client: Client): Promise<string | null> {
+  const { data } = await client.graphql(SHOP_ALL_QUERY, { cache: Cache.short() });
+  const ref = data?.settings?.shopAll?.reference as { handle?: string } | null | undefined;
+  return ref?.handle ?? null;
+}
+
+export async function loadCollection(client: Client, handle: string, sort: SortKey, extraHosts: (string | null | undefined)[]) {
+  const variables = {
+    handle,
+    sortKey: (sort === "featured" ? "COLLECTION_DEFAULT" : "PRICE") as "COLLECTION_DEFAULT" | "PRICE",
+    reverse: sort === "price-desc",
   };
-
-  const { data } = await storefrontClient.graphql(COLLECTIONS_QUERY, { variables });
-
+  const [{ data, errors }, extra] = await Promise.all([
+    client.graphql(COLLECTION_QUERY, { variables, cache: Cache.short() }),
+    untypedQuery<{ collection: { sections?: { references?: { nodes: unknown[] } | null } | null } | null }>(client, COLLECTION_SECTIONS_QUERY, { handle }),
+  ]);
+  if (errors?.length) throw new Error(`Collection query failed: ${errors.map((e) => e.message).join("; ")}`);
+  if (!data?.collection) return null;
+  const { products, eyebrow, ...collection } = data.collection;
+  const sections = extra.collection?.sections;
+  const hosts = storeHosts(data.shop.primaryDomain.host, ...extraHosts);
+  const cards = products.nodes.map(cardFromProduct);
+  // Coming-soon products have no price yet; they always follow what is on sale.
+  const items = [...cards.filter((c) => !c.comingSoon), ...cards.filter((c) => c.comingSoon)];
   return {
-    collections: data?.collections ?? {
-      nodes: [],
-      pageInfo: { hasNextPage: false, endCursor: null },
-    },
-    origin: url.origin,
+    collection: { ...collection, eyebrow: eyebrow?.value ?? "" },
+    sections: await hydrateProducts(client, normalizeLinks(sections?.references?.nodes ?? [], hosts)),
+    items,
   };
+}
+
+/** The scent families present in a list of products, in their Shopify sort order. */
+export function scentsOf(items: CardItem[]) {
+  const map = new Map<string, { handle: string; name: string; sort: number }>();
+  for (const item of items) if (item.scent && !map.has(item.scent.handle)) map.set(item.scent.handle, item.scent);
+  return [...map.values()].sort((a, b) => a.sort - b.sort);
 }

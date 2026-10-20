@@ -6,8 +6,8 @@ import type { CardBrand, DigitalWallet } from "@shopify/hydrogen/storefront-api-
 
 import type { RootLayoutQueryResult } from "~/lib/root-layout";
 
-/** Neutral name used only when the Storefront API returns no shop name. */
-export const FALLBACK_SHOP_NAME = "Store";
+/** Empty when the Storefront API returns no shop name: nothing is invented. */
+export const FALLBACK_SHOP_NAME = "";
 
 export type StorefrontShopLogo = {
   url: string;

@@ -1,7 +1,9 @@
 // Shared checks for the newsletter and contact forms. Light spam protection without a
 // third-party service: a hidden honeypot field people never fill, and a minimum time
 // between rendering the form and submitting it.
-export const HONEYPOT_FIELD = "company";
+// A name no browser autofills (unlike "company" or "website"), so real people never
+// trip it, including those who rely on autofill.
+export const HONEYPOT_FIELD = "pw_leave_blank";
 export const RENDERED_AT_FIELD = "rendered_at";
 const MIN_FILL_MS = 1500;
 

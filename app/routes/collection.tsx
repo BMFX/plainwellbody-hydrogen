@@ -1,84 +1,77 @@
 import { AnalyticsEvent } from "@shopify/hydrogen";
 import { useEffect } from "react";
-import { Form, Link, NavLink, useNavigation, useSubmit } from "react-router";
+import { Form, Link, redirect, useLocation, useNavigation, useSubmit } from "react-router";
 
-import { Media, mediaPreload } from "~/components/Media";
 import { ProductGrid } from "~/components/ProductCard";
-import { RoutineBlock } from "~/components/RoutineBlock";
-import { ShopifyCollection } from "~/components/ShopifyCollection";
-import { loadCollectionPage } from "~/lib/collection";
-import {
-  CATEGORY_TABS,
-  findCollectionPage,
-  SCENT_FILTERS,
-  type CollectionPage,
-  type Scent,
-} from "~/lib/plainwell";
-import { browse, loadCatalog, parseSort, SORT_OPTIONS } from "~/lib/plainwell-catalog";
+import { Sections } from "~/components/Sections";
+import { imagePreload, ShopifyImage } from "~/components/ShopifyImage";
+import { loadCollection, parseSort, scentsOf, shopAllHandle, SORTS, type SortKey } from "~/lib/collections";
+import { envContext } from "~/lib/env";
+import { seoMeta } from "~/lib/seo";
 import { storefrontClientContext } from "~/lib/storefront";
-import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop";
+import { useSiteContent, useText } from "~/lib/text";
 
 import type { Route } from "./+types/collection";
 
 export { RouteErrorBoundary as ErrorBoundary } from "~/components/ErrorPage";
 
 const BANNER_SIZES = "100vw";
+const SORT_KEYS: Record<SortKey, string> = {
+  featured: "collection.sort.featured",
+  "price-asc": "collection.sort.price_asc",
+  "price-desc": "collection.sort.price_desc",
+};
 
 export function meta({ matches, data }: Route.MetaArgs) {
-  const shopName = getShopNameFromRootMatch(matches[0]);
-  if (data?.kind === "plainwell") {
-    return [
-      { title: formatPageTitle(data.page.title, shopName) },
-      { name: "description", content: data.page.intro },
-      { tagName: "link", rel: "canonical", href: `${data.origin}/collections/${data.page.handle === "plainwell" ? "all" : data.page.handle}` },
-      // The banner is the LCP image on every Plainwell collection page.
-      { tagName: "link", ...mediaPreload(data.page.banner.name, BANNER_SIZES) },
-    ];
-  }
-  const title = data?.kind === "shopify" ? data.collection.title : "Collection";
+  if (!data) return seoMeta(matches[0], { title: "", path: "/collections/all", noindex: true });
+  const { collection, path } = data;
+  const preload = imagePreload(collection.image, BANNER_SIZES);
   return [
-    { title: formatPageTitle(title, shopName) },
-    { name: "description", content: `Shop ${title} at ${shopName}.` },
+    ...seoMeta(matches[0], {
+      title: collection.seo.title || collection.title,
+      description: collection.seo.description || collection.description || null,
+      path,
+      image: collection.image ? { url: collection.image.url, alt: collection.image.altText ?? undefined } : null,
+    }),
+    ...(preload ? [preload] : []),
   ];
 }
 
 export async function loader({ context, params, request }: Route.LoaderArgs) {
   const handle = params.handle;
   if (!handle) throw new Response("Not Found", { status: 404 });
-  const storefrontClient = context.get(storefrontClientContext);
-  const page = findCollectionPage(handle);
-
-  if (!page) {
-    return { kind: "shopify" as const, ...(await loadCollectionPage({ storefrontClient, handle, request })) };
-  }
-
+  const env = context.get(envContext);
+  const client = context.get(storefrontClientContext);
   const url = new URL(request.url);
-  const scentParam = url.searchParams.get("scent");
-  const scent = page.scent ?? SCENT_FILTERS.find((s) => s.value === scentParam)?.value;
-  const sort = parseSort(url.searchParams.get("sort"));
-  const catalog = await loadCatalog(storefrontClient);
-  const result = browse(catalog, { category: page.category, family: page.family, scent }, sort);
+  const shopAll = await shopAllHandle(client);
 
+  // /collections/all is the Shop all collection from Site settings; its own URL redirects here.
+  if (handle !== "all" && handle === shopAll) throw redirect(`/collections/all${url.search}`, 301);
+  const realHandle = handle === "all" ? shopAll : handle;
+  if (!realHandle) throw new Response("Not Found", { status: 404 });
+
+  const sort = parseSort(url.searchParams.get("sort"));
+  const loaded = await loadCollection(client, realHandle, sort, [env.PUBLIC_STORE_DOMAIN, url.hostname]);
+  if (!loaded) throw new Response("Not Found", { status: 404 });
+
+  const scents = scentsOf(loaded.items);
+  const scent = scents.find((s) => s.handle === url.searchParams.get("scent"))?.handle ?? null;
+  const items = scent ? loaded.items.filter((item) => item.scent?.handle === scent) : loaded.items;
   return {
-    kind: "plainwell" as const,
-    page,
-    collection: catalog.collection,
-    scent: scent ?? null,
+    ...loaded,
+    path: `/collections/${handle}`,
+    items,
+    scents,
+    scent,
     sort,
-    ...result,
     origin: url.origin,
   };
 }
 
 export default function CollectionRoute({ loaderData }: Route.ComponentProps) {
-  if (loaderData.kind === "shopify") return <ShopifyCollection loaderData={loaderData} />;
-  return <PlainwellCollection data={loaderData} />;
-}
-
-type PlainwellData = Extract<Route.ComponentProps["loaderData"], { kind: "plainwell" }>;
-
-function PlainwellCollection({ data }: { data: PlainwellData }) {
-  const { page, items, liveCount, comingSoonCount, collection } = data;
+  const { collection, items, scents, path, sections } = loaderData;
+  const t = useText();
+  const content = useSiteContent();
   const navigation = useNavigation();
   const updating = navigation.state === "loading" && navigation.location?.pathname.startsWith("/collections/");
 
@@ -86,106 +79,105 @@ function PlainwellCollection({ data }: { data: PlainwellData }) {
     window.Shopify?.analytics?.publish(AnalyticsEvent.COLLECTION_VIEWED, {
       collection: { id: collection.id, handle: collection.handle },
     });
-  }, [collection.id, collection.handle, page.handle]);
+  }, [collection.id, collection.handle]);
 
-  const total = items.length;
-  const countLabel =
-    `${total} ${total === 1 ? "product" : "products"}` + (comingSoonCount && liveCount ? ` · ${comingSoonCount} coming soon` : "");
+  const categories = content?.menus.categories ?? [];
+  const inCategories = categories.some((c) => c.url.split("?")[0] === path);
+  const soon = items.filter((i) => i.comingSoon).length;
+  const countBase = t(items.length === 1 ? "collection.count_one" : "collection.count_other", { count: items.length });
+  const countLabel = soon && soon < items.length ? t("collection.count_soon", { count: countBase, soon }) : countBase;
 
   return (
     <main className="flex-1" id="main-content" tabIndex={-1}>
-      <BreadcrumbJsonLd page={page} origin={data.origin} />
+      <BreadcrumbJsonLd title={collection.title} path={path} origin={loaderData.origin} />
       <section className="pw-gutter grid items-end gap-x-16 gap-y-6 pt-14 pb-10 md:grid-cols-2 md:pt-[72px]">
         <div className="flex flex-col gap-4">
-          <span className="pw-eyebrow">{page.eyebrow}</span>
-          <h1 className="pw-h1">{page.title}</h1>
+          {collection.eyebrow ? <span className="pw-eyebrow">{collection.eyebrow}</span> : null}
+          <h1 className="pw-h1">{collection.title}</h1>
         </div>
-        <p className="pw-lead">{page.intro}</p>
+        {collection.description ? <p className="pw-lead">{collection.description}</p> : null}
       </section>
 
-      <Media
-        name={page.banner.name}
-        alt={page.banner.alt}
-        sizes={BANNER_SIZES}
-        width={1600}
-        height={900}
-        priority
-        className="block h-[260px] w-full object-cover md:h-[440px]"
-      />
+      <ShopifyImage image={collection.image} sizes={BANNER_SIZES} priority className="block h-[260px] w-full object-cover md:h-[440px]" />
 
-      <section className="pw-gutter flex flex-col gap-1 pt-8" aria-label="Filter and sort">
-        {page.scent || page.family ? null : (
-          <nav aria-label="Category" className="border-line scrollbar-none -mx-[var(--spacing-gutter)] flex gap-x-7 overflow-x-auto border-b px-[var(--spacing-gutter)] whitespace-nowrap md:mx-0 md:px-0">
-            {CATEGORY_TABS.map((tab) => (
-              <NavLink
-                key={tab.href}
-                to={{ pathname: tab.href, search: data.scent ? `?scent=${data.scent}` : "" }}
-                preventScrollReset
-                end
-                className={({ isActive }) =>
-                  `relative inline-flex h-11 shrink-0 items-center text-sm ${isActive || (tab.href === "/collections/all" && page.handle === "plainwell") ? "text-ink after:bg-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px" : "text-muted hover:text-ink"}`
-                }
-              >
-                {tab.label}
-              </NavLink>
-            ))}
+      <section className="pw-gutter flex flex-col gap-1 pt-8" aria-label={t("collection.filter_label")}>
+        {inCategories ? (
+          <nav
+            aria-label={t("collection.categories_label")}
+            className="border-line scrollbar-none -mx-[var(--spacing-gutter)] flex gap-x-7 overflow-x-auto border-b px-[var(--spacing-gutter)] whitespace-nowrap md:mx-0 md:px-0"
+          >
+            {categories.map((tab) => {
+              const tabPath = tab.url.split("?")[0];
+              const active = tabPath === path;
+              return (
+                <Link
+                  key={tab.url + tab.title}
+                  to={{ pathname: tabPath, search: loaderData.scent ? `?scent=${loaderData.scent}` : "" }}
+                  preventScrollReset
+                  aria-current={active ? "page" : undefined}
+                  className={`relative inline-flex h-11 shrink-0 items-center text-sm ${active ? "text-ink after:bg-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px" : "text-muted hover:text-ink"}`}
+                >
+                  {tab.title}
+                </Link>
+              );
+            })}
           </nav>
-        )}
+        ) : null}
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-          {page.scent ? (
-            <span />
-          ) : (
-            <ScentTabs pathname={`/collections/${page.handle}`} scent={data.scent} sort={data.sort} />
-          )}
-          <SortForm countLabel={countLabel} scent={page.scent ? null : data.scent} sort={data.sort} />
+          {scents.length > 1 ? <ScentTabs pathname={path} scents={scents} scent={loaderData.scent} sort={loaderData.sort} /> : <span />}
+          <SortForm countLabel={countLabel} scent={loaderData.scent} sort={loaderData.sort} />
         </div>
       </section>
 
-      <section
-        className={`pt-7 motion-safe:transition-opacity ${updating ? "opacity-60" : ""}`}
-        aria-busy={updating}
-        aria-labelledby="products-heading"
-      >
+      <section className={`pt-7 motion-safe:transition-opacity ${updating ? "opacity-60" : ""}`} aria-busy={updating} aria-labelledby="products-heading">
         <h2 id="products-heading" className="sr-only">
-          Products
+          {t("collection.products_heading")}
         </h2>
         {items.length ? (
-          <ProductGrid items={items} priorityCount={0} />
+          <ProductGrid items={items} />
         ) : (
           <div className="pw-gutter border-line flex flex-col items-center gap-4 border-y py-24 text-center">
-            <p className="pw-heading">Nothing in that combination yet.</p>
-            <Link to={`/collections/${page.handle}`} preventScrollReset className="pw-link">
-              Show everything
+            <p className="pw-heading">{t("collection.empty")}</p>
+            <Link to={path} preventScrollReset className="pw-link">
+              {t("collection.empty_link")}
             </Link>
           </div>
         )}
       </section>
 
-      <RoutineBlock />
+      {sections.length ? (
+        <div className="mt-28">
+          <Sections sections={sections} firstIsTitle={false} />
+        </div>
+      ) : null}
     </main>
   );
 }
 
-function ScentTabs({ pathname, scent, sort }: { pathname: string; scent: Scent | null; sort: string }) {
-  const options = [{ value: null, label: "All scents" }, ...SCENT_FILTERS];
+function ScentTabs({ pathname, scents, scent, sort }: { pathname: string; scents: { handle: string; name: string }[]; scent: string | null; sort: string }) {
+  const t = useText();
+  const options = [{ handle: null as string | null, name: t("collection.all_scents") }, ...scents];
   return (
-    <nav aria-label="Scent" className="scrollbar-none -mx-[var(--spacing-gutter)] flex max-w-[100vw] gap-x-7 overflow-x-auto px-[var(--spacing-gutter)] whitespace-nowrap md:mx-0 md:px-0">
+    <nav
+      aria-label={t("collection.scents_label")}
+      className="scrollbar-none -mx-[var(--spacing-gutter)] flex max-w-[100vw] gap-x-7 overflow-x-auto px-[var(--spacing-gutter)] whitespace-nowrap md:mx-0 md:px-0"
+    >
       {options.map((option) => {
         const params = new URLSearchParams();
-        if (option.value) params.set("scent", option.value);
+        if (option.handle) params.set("scent", option.handle);
         if (sort !== "featured") params.set("sort", sort);
-        const active = option.value === scent;
+        const active = option.handle === scent;
         const search = params.toString();
         return (
           <Link
-            key={option.label}
+            key={option.handle ?? "all"}
             to={{ pathname, search: search ? `?${search}` : "" }}
             preventScrollReset
             replace
             aria-current={active ? "true" : undefined}
             className={`relative inline-flex h-11 shrink-0 items-center text-sm ${active ? "text-ink after:bg-ink after:absolute after:inset-x-0 after:bottom-2 after:h-px" : "text-muted hover:text-ink"}`}
           >
-            {option.label}
+            {option.name}
           </Link>
         );
       })}
@@ -193,11 +185,14 @@ function ScentTabs({ pathname, scent, sort }: { pathname: string; scent: Scent |
   );
 }
 
-function SortForm({ countLabel, scent, sort }: { countLabel: string; scent: Scent | null; sort: string }) {
+function SortForm({ countLabel, scent, sort }: { countLabel: string; scent: string | null; sort: SortKey }) {
+  const t = useText();
   const submit = useSubmit();
+  const location = useLocation();
   return (
     <Form
       method="get"
+      action={location.pathname}
       preventScrollReset
       replace
       className="flex h-11 items-center gap-5 text-[13px]"
@@ -208,37 +203,32 @@ function SortForm({ countLabel, scent, sort }: { countLabel: string; scent: Scen
       </span>
       {scent ? <input type="hidden" name="scent" value={scent} /> : null}
       <label htmlFor="pw-sort" className="text-muted">
-        Sort
+        {t("collection.sort")}
       </label>
-      <select
-        id="pw-sort"
-        name="sort"
-        defaultValue={sort}
-        key={sort}
-        className="border-ink !w-auto border-0 border-b !bg-transparent !px-0 !py-1 text-[13px]"
-      >
-        {SORT_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
+      <select id="pw-sort" name="sort" defaultValue={sort} key={sort} className="border-ink !w-auto border-0 border-b !bg-transparent !px-0 !py-1 text-[13px]">
+        {SORTS.map((value) => (
+          <option key={value} value={value}>
+            {t(SORT_KEYS[value])}
           </option>
         ))}
       </select>
       <noscript>
         <button type="submit" className="pw-link">
-          Apply
+          {t("collection.apply")}
         </button>
       </noscript>
     </Form>
   );
 }
 
-function BreadcrumbJsonLd({ page, origin }: { page: CollectionPage; origin: string }) {
+function BreadcrumbJsonLd({ title, path, origin }: { title: string; path: string; origin: string }) {
+  const t = useText();
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: `${origin}/` },
-      { "@type": "ListItem", position: 2, name: page.title, item: `${origin}/collections/${page.handle}` },
+      { "@type": "ListItem", position: 1, name: t("breadcrumb.home"), item: `${origin}/` },
+      { "@type": "ListItem", position: 2, name: title, item: `${origin}${path}` },
     ],
   };
   return <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>;

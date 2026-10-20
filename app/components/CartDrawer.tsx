@@ -6,10 +6,13 @@ import { closeCartDrawer, configureOpenCartAction, CART_DRAWER_ID } from "~/lib/
 import { shopifyImageUrl, shopifySrcSet } from "~/lib/images";
 import { formatPrice } from "~/lib/money";
 import { shippingNote } from "~/lib/shipping";
+import { useSiteContent, useText } from "~/lib/text";
+import { sizeOf } from "./ProductCard";
 
 import { publishCartViewed } from "./AnalyticsTrackers";
 
 function CartErrorBanner() {
+  const t = useText();
   const errors = useCart((state) => state.errors);
   const [dismissedAt, setDismissedAt] = useState(0);
   const messages = useMemo(() => {
@@ -34,7 +37,7 @@ function CartErrorBanner() {
           className="button-ghost focus-visible:outline-accent rounded px-2 py-1 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
           onClick={() => setDismissedAt(errors.lastUpdatedAt)}
         >
-          Dismiss
+          {t("bag.dismiss")}
         </button>
       </div>
     </div>
@@ -50,6 +53,7 @@ function hasPendingCost(pending: {
 }
 
 function useCartStatusMessage(): string {
+  const t = useText();
   const pending = useCart((state) => state.pending);
   const revalidating = useCart((state) => "revalidating" in state && state.revalidating === true);
   const networkErrors = useCart((state) => state.errors.network);
@@ -60,8 +64,8 @@ function useCartStatusMessage(): string {
     if (isPending) setSawPending(true);
   }, [isPending]);
 
-  if (isPending) return "Updating cart totals";
-  if (sawPending && networkErrors.length === 0) return "Cart totals updated";
+  if (isPending) return t("bag.status_updating");
+  if (sawPending && networkErrors.length === 0) return t("bag.status_updated");
   return "";
 }
 
@@ -85,6 +89,7 @@ export function CartLineItem({
   line: CartLineView;
   emptyCartFocusId: string;
 }) {
+  const t = useText();
   const { formProps, register } = useCartForm();
   const pendingLines = useCart((state) => state.pending.lines);
   const lineError = useCart((state) => state.errors.lines.get(line.id));
@@ -117,8 +122,8 @@ export function CartLineItem({
     target?.focus();
   };
 
-  const title = product?.title ?? merchandise?.title ?? "Product";
-  const size = merchandise?.selectedOptions?.find((option) => option.name === "Size")?.value ?? optionText;
+  const title = product?.title ?? merchandise?.title ?? "";
+  const size = merchandise?.selectedOptions ? sizeOf(merchandise.selectedOptions) || optionText : optionText;
 
   return (
     <li
@@ -169,14 +174,14 @@ export function CartLineItem({
               type="submit"
               {...register("decrease")}
               className="inline-flex h-full w-10 items-center justify-center text-base"
-              aria-label={`Decrease quantity for ${title}`}
+              aria-label={t("bag.line.decrease", { title })}
             >
               −
             </button>
             <input
               {...register("quantity", { value: line.quantity, interactive: true })}
               className={`number-reset !h-full !w-9 !border-0 !bg-transparent !p-0 text-center !text-sm ${pending ? "opacity-50" : ""}`}
-              aria-label={`Quantity for ${title}`}
+              aria-label={t("bag.line.quantity", { title })}
               aria-describedby={lineError?.userErrors.length ? errorId : undefined}
               aria-invalid={lineError?.userErrors.length ? true : undefined}
             />
@@ -184,7 +189,7 @@ export function CartLineItem({
               type="submit"
               {...register("increase")}
               className="inline-flex h-full w-10 items-center justify-center text-base"
-              aria-label={`Increase quantity for ${title}`}
+              aria-label={t("bag.line.increase", { title })}
             >
               +
             </button>
@@ -193,9 +198,9 @@ export function CartLineItem({
             type="submit"
             {...register("remove")}
             className="text-muted hover:text-ink inline-flex h-11 items-center text-[13px] underline underline-offset-[3px]"
-            aria-label={`Remove ${title}`}
+            aria-label={t("bag.line.remove_sr", { title })}
           >
-            Remove
+            {t("bag.line.remove")}
           </button>
         </form>
         {lineError?.userErrors.length ? (
@@ -210,19 +215,20 @@ export function CartLineItem({
 }
 
 function CartLines() {
+  const t = useText();
   const loading = useCart((state) => state.loading);
   const lines = useCart((state) => state.data.lines.nodes);
 
   if (loading) {
-    return <p className="text-muted">Loading your bag…</p>;
+    return <p className="text-muted">{t("bag.loading")}</p>;
   }
 
   if (lines.length === 0) {
     return (
       <div className="flex h-full flex-col items-start justify-center gap-5">
-        <p className="pw-heading">Your bag is empty.</p>
+        <p className="pw-heading">{t("bag.empty")}</p>
         <Link to="/collections/all" className="pw-btn pw-btn--primary" onClick={() => closeCartDrawer()}>
-          Shop all essentials
+          {t("bag.empty_link")}
         </Link>
       </div>
     );
@@ -238,6 +244,8 @@ function CartLines() {
 }
 
 function CartFooter() {
+  const t = useText();
+  const content = useSiteContent();
   const cart = useCart((state) => state.data);
   const pending = useCart((state) => state.pending);
   const revalidating = useCart((state) => "revalidating" in state && state.revalidating === true);
@@ -251,23 +259,23 @@ function CartFooter() {
       <div className="flex flex-col">
         <div className="flex items-baseline justify-between py-3" aria-busy={isPending}>
           <span>
-            Subtotal
-            {isPending ? <span className="text-muted"> (updating)</span> : null}
+            {t("bag.subtotal")}
+            {isPending ? <span className="text-muted"> {t("bag.updating")}</span> : null}
           </span>
           <span className={`text-xl tracking-[-0.01em] ${isPending ? "opacity-50" : ""}`}>
             {formatPrice(cart.cost.subtotalAmount)}
           </span>
         </div>
         <p className={`text-muted pb-4 text-[13px] ${isPending ? "opacity-50" : ""}`}>
-          {shippingNote(cart.cost.subtotalAmount)} Taxes calculated at checkout.
+          {[content ? shippingNote(t, content.settings, cart.cost.subtotalAmount) : "", t("bag.taxes_note")].filter(Boolean).join(" ")}
         </p>
         {cart.checkoutUrl ? (
           <a href={cart.checkoutUrl} className="pw-btn pw-btn--primary w-full">
-            Check out
+            {t("bag.checkout")}
           </a>
         ) : null}
         <Link to="/cart" className="pw-link mt-4 self-center" onClick={() => closeCartDrawer()}>
-          View bag
+          {t("bag.view")}
         </Link>
       </div>
     </div>
@@ -275,6 +283,7 @@ function CartFooter() {
 }
 
 export function CartDrawer() {
+  const t = useText();
   const totalQuantity = useCart((state) => state.data.totalQuantity);
   const cart = useCart((state) => state.data);
   const statusMessage = useCartStatusMessage();
@@ -312,10 +321,10 @@ export function CartDrawer() {
           <div className="border-line flex h-16 shrink-0 items-center border-b ps-5 pe-2 sm:ps-8">
             <div className="flex flex-1 items-baseline gap-3">
               <h2 id="cart-drawer-title" tabIndex={-1} className="pw-section-label">
-                Your bag
+                {t("bag.title")}
               </h2>
               <span className="text-muted text-[13px]">
-                {totalQuantity} {totalQuantity === 1 ? "item" : "items"}
+                {t(totalQuantity === 1 ? "bag.count_one" : "bag.count_other", { count: totalQuantity })}
               </span>
             </div>
             <button
@@ -323,7 +332,7 @@ export function CartDrawer() {
               commandfor={CART_DRAWER_ID}
               command="close"
               className="button-icon"
-              aria-label="Close"
+              aria-label={t("nav.close")}
               onClick={() => closeCartDrawer()}
             >
               <img src="/icons/icon-x.svg" alt="" className="size-5" aria-hidden="true" loading="lazy" />

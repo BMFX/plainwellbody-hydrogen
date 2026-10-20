@@ -8,7 +8,8 @@
     "dev": "hydrogen skills check --mode=warn && vite dev",
     "dev:https": "hydrogen skills check --mode=warn && vite dev",
     "preview": "react-router build && vite preview",
-    "typecheck": "react-router typegen && tsc && hydrogen gql check --fail-on-warn",
+    "typecheck": "react-router typegen && tsc && hydrogen gql check --fail-on-warn && node scripts/shopify/validate-queries.mjs",
+    "shopify:setup": "node scripts/shopify/setup.mjs",
     "start": "node --env-file-if-exists=.env scripts/serve.mjs",
     "test:runtime": "node --test scripts/runtime.test.mjs"
   },

@@ -65,12 +65,13 @@ export async function loadProductInventory(
   }
 }
 
-export function inventoryHintText(
+/** Stock hint for a variant: sold out, or 1-5 left. The wording is Interface text. */
+export function inventoryHint(
   variant: { id: string; availableForSale: boolean } | null,
   inventory: Record<string, number>,
-): string | null {
+): { kind: "sold_out" } | { kind: "low"; quantity: number } | null {
   if (!variant) return null;
-  if (!variant.availableForSale) return "Out of stock";
+  if (!variant.availableForSale) return { kind: "sold_out" };
   const quantity = inventory[variant.id];
-  return Number.isInteger(quantity) && quantity >= 1 && quantity <= 5 ? `Only ${quantity} left` : null;
+  return Number.isInteger(quantity) && quantity >= 1 && quantity <= 5 ? { kind: "low", quantity } : null;
 }

@@ -7,33 +7,24 @@ import {
   gql,
   type SelectedOption,
 } from "@shopify/hydrogen";
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 
-import { Media, mediaPreload } from "~/components/Media";
-import { ProductGrid, type CardItem } from "~/components/ProductCard";
+import { ProductGrid, sizeOf } from "~/components/ProductCard";
+import { parseRich, RichText } from "~/components/RichText";
+import { ShopifyImage } from "~/components/ShopifyImage";
 import { openCartDrawer } from "~/lib/cart-drawer";
+import { loadCollection, shopAllHandle } from "~/lib/collections";
+import { Entry, type Image, type RichNode } from "~/lib/content";
+import { envContext } from "~/lib/env";
 import { shopifyImageUrl, shopifySrcSet } from "~/lib/images";
 import { formatPrice, salePercent, wholePrice } from "~/lib/money";
-import {
-  CATEGORY_LABEL,
-  categoryOf,
-  familyOf,
-  findConcept,
-  FREE_SHIPPING_THRESHOLD,
-  ritualFor,
-  SCENT_LABEL,
-  SCENT_NOTE,
-  SCENT_ORDER,
-  scentOf,
-  type ConceptProduct,
-  type Scent,
-} from "~/lib/plainwell";
-import { loadCatalog } from "~/lib/plainwell-catalog";
 import { ProductProvider, useProductForm } from "~/lib/product";
-import { inventoryHintText, loadProductInventory } from "~/lib/product-inventory";
+import { inventoryHint, loadProductInventory } from "~/lib/product-inventory";
+import { seoMeta } from "~/lib/seo";
+import { freeShippingMessage } from "~/lib/shipping";
 import { storefrontClientContext } from "~/lib/storefront";
-import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop";
+import { useSiteContent, useText } from "~/lib/text";
 
 import type { Route } from "./+types/product";
 
@@ -138,106 +129,187 @@ const PRODUCT_QUERY = gql(
         ) {
           ...ProductVariantFields
         }
+        collections(first: 20) {
+          nodes {
+            handle
+            title
+          }
+        }
+        scent: metafield(namespace: "plainwell", key: "scent") {
+          reference {
+            ... on Metaobject {
+              handle
+              name: field(key: "name") {
+                value
+              }
+              note: field(key: "note") {
+                value
+              }
+              ritual: field(key: "ritual_image") {
+                reference {
+                  ... on MediaImage {
+                    image {
+                      url
+                      altText
+                      width
+                      height
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        family: metafield(namespace: "plainwell", key: "family") {
+          value
+        }
+        comingSoon: metafield(namespace: "plainwell", key: "coming_soon") {
+          value
+        }
+        details: metafield(namespace: "plainwell", key: "details") {
+          value
+        }
+        ingredients: metafield(namespace: "plainwell", key: "ingredients") {
+          value
+        }
+        ritualImage: metafield(namespace: "plainwell", key: "ritual_image") {
+          reference {
+            ... on MediaImage {
+              image {
+                url
+                altText
+                width
+                height
+              }
+            }
+          }
+        }
+        rating: metafield(namespace: "reviews", key: "rating") {
+          value
+        }
+        ratingCount: metafield(namespace: "reviews", key: "rating_count") {
+          value
+        }
       }
     }
   `,
   [PRODUCT_VARIANT_FRAGMENT],
 );
 
+const GALLERY_SIZES = "(min-width: 48rem) 50vw, 100vw";
+const GALLERY_WIDTHS = [480, 720, 960, 1200, 1600];
+
 export function meta({ matches, data }: Route.MetaArgs) {
-  const shopName = getShopNameFromRootMatch(matches[0]);
-  if (!data) return [{ title: formatPageTitle("Product", shopName) }];
-  const { title, description, image } =
-    data.kind === "live"
-      ? {
-          title: data.product.seo.title || data.product.title,
-          description: data.product.seo.description || data.product.description,
-          image: data.product.featuredImage?.url,
-        }
-      : { title: data.concept.title, description: `${data.concept.title} is coming soon to Plainwell.`, image: undefined };
+  if (!data) return seoMeta(matches[0], { title: "", path: "/collections/all", noindex: true });
+  const { product } = data;
+  const image = product.featuredImage;
   return [
-    { title: formatPageTitle(title, shopName) },
-    { name: "description", content: description },
-    { tagName: "link", rel: "canonical", href: `${data.origin}/products/${data.handle}` },
-    { property: "og:type", content: "product" },
-    { property: "og:title", content: title },
-    { property: "og:description", content: description },
+    ...seoMeta(matches[0], {
+      title: product.seo.title || product.title,
+      description: product.seo.description || product.description,
+      path: `/products/${product.handle}`,
+      type: "product",
+      image: image ? { url: shopifyImageUrl(image.url, 1200), width: 1200, height: 1200, alt: image.altText || product.title } : null,
+    }),
     ...(image
       ? [
-          { property: "og:image", content: shopifyImageUrl(image, 1200) },
           // The packshot is the LCP image: start it with the document.
           {
             tagName: "link",
             rel: "preload",
             as: "image",
-            href: shopifyImageUrl(image, 900),
-            imageSrcSet: shopifySrcSet(image, GALLERY_WIDTHS),
+            href: shopifyImageUrl(image.url, 900),
+            imageSrcSet: shopifySrcSet(image.url, GALLERY_WIDTHS),
             imageSizes: GALLERY_SIZES,
             fetchPriority: "high",
           },
         ]
-      : [{ tagName: "link", ...mediaPreload(`pack-${data.handle}`, GALLERY_SIZES) }]),
+      : []),
   ];
+}
+
+type ScentRef = {
+  handle?: string;
+  name?: { value?: string | null } | null;
+  note?: { value?: string | null } | null;
+  ritual?: { reference?: { image?: Image } | null } | null;
+};
+
+/** Shopify's standard reviews.rating value: {"value": "4.7", "scale_max": "5", ...}. */
+function parseRating(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const r = JSON.parse(value) as { value?: string; scale_max?: string };
+    const rating = Number(r.value);
+    return Number.isFinite(rating) ? { value: rating, max: Number(r.scale_max ?? 5) } : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseRichValue(value: string | null | undefined): RichNode | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as RichNode;
+  } catch {
+    return null;
+  }
 }
 
 export async function loader({ context, params, request }: Route.LoaderArgs) {
   const handle = params.handle;
   if (!handle) throw new Response("Not Found", { status: 404 });
 
-  const storefrontClient = context.get(storefrontClientContext);
+  const env = context.get(envContext);
+  const client = context.get(storefrontClientContext);
   const url = new URL(request.url);
   const selectedOptions = getSelectedProductOptions({ searchParams: url.searchParams });
-  const [productResult, catalog, inventory] = await Promise.all([
-    storefrontClient.graphql(PRODUCT_QUERY, {
-      variables: { handle, selectedOptions },
-      cache: Cache.short(),
-    }),
-    loadCatalog(storefrontClient),
-    loadProductInventory(storefrontClient, handle, selectedOptions),
+  const [productResult, inventory, shopAll] = await Promise.all([
+    client.graphql(PRODUCT_QUERY, { variables: { handle, selectedOptions }, cache: Cache.short() }),
+    loadProductInventory(client, handle, selectedOptions),
+    shopAllHandle(client),
   ]);
-
   if (productResult.errors?.length) {
     console.error(`Product query failed for ${handle}: ${productResult.errors.map((e) => e.message).join("; ")}`);
     throw new Response("Product query failed", { status: 500 });
   }
-
   const product = productResult.data?.product;
-  const concept = product ? null : findConcept(handle);
-  if (!product && !concept) throw new Response("Not Found", { status: 404 });
+  if (!product) throw new Response("Not Found", { status: 404 });
 
-  const scent = product ? scentOf(product.tags) : concept!.scent;
-  const family = product ? familyOf(product.handle) : concept!.family;
-  const all = [...catalog.live, ...catalog.concepts];
-
-  // The scent switch: every product in the family, live or coming soon.
-  const siblings = all
-    .filter((item) => item.family === family)
-    .sort((a, b) => SCENT_ORDER.indexOf(a.scent ?? "botanical") - SCENT_ORDER.indexOf(b.scent ?? "botanical"))
-    .map((item) => ({ handle: item.handle, scent: item.scent, comingSoon: !item.live }));
-
-  // Pairs well with: the same scent in other formats, live first, topped up from the range.
-  let pairs = all.filter((item) => item.scent === scent && item.family !== family);
-  pairs.sort((a, b) => Number(!a.live) - Number(!b.live));
+  // The range, for the scent switch (same product family) and Pairs well with (same scent).
+  const range = shopAll ? ((await loadCollection(client, shopAll, "featured", [env.PUBLIC_STORE_DOMAIN, url.hostname]))?.items ?? []) : [];
+  const scent = product.scent?.reference as ScentRef | null | undefined;
+  const family = product.family?.value ?? "";
+  const siblings = family
+    ? range
+        .filter((item) => item.family === family)
+        .sort((a, b) => (a.scent?.sort ?? 999) - (b.scent?.sort ?? 999))
+        .map((item) => ({ handle: item.handle, name: item.scent?.name ?? item.title, comingSoon: item.comingSoon }))
+    : [];
+  let pairs = range.filter((item) => item.scent?.handle === scent?.handle && item.family !== family && item.handle !== product.handle);
   pairs = pairs.slice(0, 4);
-  if (pairs.length < 4) {
-    pairs = pairs.concat(
-      catalog.live.filter((item) => item.family !== family && !pairs.includes(item)).slice(0, 4 - pairs.length),
-    );
-  }
+  if (pairs.length < 4) pairs = pairs.concat(range.filter((item) => !item.comingSoon && item.family !== family && !pairs.includes(item)).slice(0, 4 - pairs.length));
 
-  const common = { handle, scent, family, siblings, pairs, origin: url.origin };
-  if (product) {
-    return { kind: "live" as const, product, inventory, category: categoryOf(product.tags, product.productType), ...common };
-  }
-  return { kind: "concept" as const, concept: concept!, category: concept!.category, ...common };
+  return {
+    product,
+    inventory,
+    scent: scent?.handle ? { handle: scent.handle, name: scent.name?.value ?? "", note: scent.note?.value ?? "" } : null,
+    ritual: (product.ritualImage?.reference as { image?: Image } | null | undefined)?.image ?? scent?.ritual?.reference?.image ?? null,
+    comingSoon: product.comingSoon?.value === "true",
+    details: parseRichValue(product.details?.value),
+    ingredients: parseRichValue(product.ingredients?.value),
+    rating: parseRating(product.rating?.value),
+    ratingCount: product.ratingCount?.value ? Number(product.ratingCount.value) : 0,
+    siblings,
+    pairs,
+    origin: url.origin,
+  };
 }
 
-const GALLERY_SIZES = "(min-width: 48rem) 50vw, 100vw";
-const GALLERY_WIDTHS = [480, 720, 960, 1200, 1600];
-
-type LiveData = Extract<Route.ComponentProps["loaderData"], { kind: "live" }>;
 type PageData = Route.ComponentProps["loaderData"];
-type ProductData = LiveData["product"];
+/** Loader data plus the breadcrumb category, resolved from the shop-categories menu. */
+type View = PageData & { category: { title: string; url: string } | null };
+type ProductData = PageData["product"];
 type ProductVariant = NonNullable<ProductData["selectedOrFirstAvailableVariant"]>;
 
 type SwatchValue = {
@@ -312,45 +384,15 @@ function ProductViewedTracker({ product }: { product: ProductData }) {
 
 
 
-function ProductImage({ data }: { data: PageData }) {
-  if (data.kind === "concept") {
-    return (
-      <Media
-        name={`pack-${data.handle}`}
-        alt={data.concept.title}
-        sizes={GALLERY_SIZES}
-        width={1000}
-        height={1250}
-        priority
-        className="h-full w-full object-cover"
-      />
-    );
-  }
-  const image = data.product.featuredImage;
-  if (!image) return null;
-  return (
-    <img
-      src={shopifyImageUrl(image.url, 900)}
-      srcSet={shopifySrcSet(image.url, GALLERY_WIDTHS)}
-      sizes={GALLERY_SIZES}
-      alt={image.altText || data.product.title}
-      width={1000}
-      height={1250}
-      fetchPriority="high"
-      className="h-full w-full object-cover"
-    />
-  );
-}
-
-function ScentSwitch({ data }: { data: PageData }) {
+function ScentSwitch({ data }: { data: View }) {
+  const t = useText();
   if (data.siblings.length < 2) return null;
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-muted text-[13px]">Scent</span>
-      <nav aria-label="Scent" className="border-line flex flex-wrap gap-x-6 border-b">
+      <span className="text-muted text-[13px]">{t("product.scent")}</span>
+      <nav aria-label={t("product.scent")} className="border-line flex flex-wrap gap-x-6 border-b">
         {data.siblings.map((sibling) => {
-          const active = sibling.handle === data.handle;
-          const label = SCENT_LABEL[sibling.scent ?? "botanical"] + (sibling.comingSoon ? " · soon" : "");
+          const active = sibling.handle === data.product.handle;
           return (
             <Link
               key={sibling.handle}
@@ -360,7 +402,7 @@ function ScentSwitch({ data }: { data: PageData }) {
               aria-current={active ? "page" : undefined}
               className={`relative inline-flex h-11 items-center text-sm ${active ? "text-ink after:bg-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px" : "text-muted hover:text-ink"}`}
             >
-              {label}
+              {sibling.comingSoon ? t("product.scent_soon", { scent: sibling.name }) : sibling.name}
             </Link>
           );
         })}
@@ -370,6 +412,7 @@ function ScentSwitch({ data }: { data: PageData }) {
 }
 
 function PriceBlock({ product, selectedVariant }: { product: ProductData; selectedVariant: ProductVariant | null }) {
+  const t = useText();
   const price = selectedVariant?.price ?? product.priceRange.minVariantPrice;
   const compareAt = selectedVariant?.compareAtPrice;
   const percent = salePercent(price, compareAt);
@@ -379,17 +422,17 @@ function PriceBlock({ product, selectedVariant }: { product: ProductData; select
       {compareAt && percent ? (
         <span className="inline-flex flex-wrap items-baseline gap-3">
           <span>
-            <span className="sr-only">Sale price: </span>
+            <span className="sr-only">{t("product.sale_price_sr")}</span>
             {wholePrice(price)}
           </span>
           <s className="text-muted text-base">
-            <span className="sr-only">Regular price: </span>
+            <span className="sr-only">{t("product.regular_price_sr")}</span>
             {formatPrice(compareAt)}
           </s>
         </span>
       ) : (
         <span>
-          <span className="sr-only">Price: </span>
+          <span className="sr-only">{t("product.price_sr")}</span>
           {wholePrice(price)}
         </span>
       )}
@@ -397,24 +440,17 @@ function PriceBlock({ product, selectedVariant }: { product: ProductData; select
   );
 }
 
-function InventoryHint({
-  selectedVariant,
-  inventory,
-}: {
-  selectedVariant: ProductVariant | null;
-  inventory: Record<string, number>;
-}) {
-  const text = inventoryHintText(selectedVariant, inventory);
-  if (!text) return null;
+function InventoryHint({ selectedVariant, inventory }: { selectedVariant: ProductVariant | null; inventory: Record<string, number> }) {
+  const t = useText();
+  const hint = inventoryHint(selectedVariant, inventory);
+  if (!hint) return null;
   return (
     <p className="text-sm" data-product-inventory aria-live="polite">
-      {text}
+      {hint.kind === "sold_out" ? t("product.out_of_stock") : t("product.low_stock", { count: hint.quantity })}
     </p>
   );
 }
 
-// Mirrors React Router's own Link guard: a modified or non-primary click belongs to
-// the browser (new tab, new window), so the href must stay in charge of it.
 function isPlainActivation(event: MouseEvent<HTMLAnchorElement>) {
   return (
     !event.defaultPrevented &&
@@ -429,6 +465,7 @@ function isPlainActivation(event: MouseEvent<HTMLAnchorElement>) {
 
 
 function VariantOptions({ product }: { product: ProductData }) {
+  const t = useText();
   const { options, register } = useProductForm();
   const swatches = useMemo(() => buildSwatchLookup(product), [product]);
   const location = useLocation();
@@ -445,7 +482,7 @@ function VariantOptions({ product }: { product: ProductData }) {
           <fieldset key={option.name} className="space-y-2">
             <legend className="text-muted mb-2.5 text-[13px]">
               {option.name}
-              {selectedValue ? `: ${selectedValue}` : ""}
+              {selectedValue ? t("product.option_selected", { value: selectedValue }) : ""}
             </legend>
             <div className="flex flex-wrap gap-2" role="group" aria-label={option.name}>
               {option.values.map((variantOption) => {
@@ -495,11 +532,11 @@ function VariantOptions({ product }: { product: ProductData }) {
                     </span>
                     <span className="sr-only">
                       {valueName}
-                      {soldOut ? " (Sold out)" : ""}
+                      {soldOut ? t("product.option_sold_out") : ""}
                     </span>
                   </>
                 ) : (
-                  `${valueName}${soldOut ? " (Sold out)" : ""}`
+                  `${valueName}${soldOut ? t("product.option_sold_out") : ""}`
                 );
 
                 if (!isCrossProduct && !variantOption.exists) {
@@ -559,6 +596,7 @@ function VariantOptions({ product }: { product: ProductData }) {
 
 
 function QuantitySelector({ quantity, setQuantity }: { quantity: number; setQuantity: (quantity: number) => void }) {
+  const t = useText();
   const { register } = useProductForm();
   const clamp = (value: number) => Math.min(99, Math.max(1, value));
 
@@ -567,7 +605,7 @@ function QuantitySelector({ quantity, setQuantity }: { quantity: number; setQuan
       <button
         type="button"
         className="inline-flex h-full w-11 items-center justify-center text-base disabled:opacity-30"
-        aria-label="Decrease quantity"
+        aria-label={t("product.quantity_decrease")}
         onClick={() => setQuantity(clamp(quantity - 1))}
         disabled={quantity <= 1}
       >
@@ -581,13 +619,13 @@ function QuantitySelector({ quantity, setQuantity }: { quantity: number; setQuan
         max={99}
         step={1}
         className="number-reset !h-full !w-10 !border-0 !bg-transparent !p-0 text-center !text-sm"
-        aria-label="Quantity"
+        aria-label={t("product.quantity")}
         onChange={(event) => setQuantity(clamp(Number.parseInt(event.currentTarget.value, 10) || 1))}
       />
       <button
         type="button"
         className="inline-flex h-full w-11 items-center justify-center text-base disabled:opacity-30"
-        aria-label="Increase quantity"
+        aria-label={t("product.quantity_increase")}
         onClick={() => setQuantity(clamp(quantity + 1))}
         disabled={quantity >= 99}
       >
@@ -598,28 +636,24 @@ function QuantitySelector({ quantity, setQuantity }: { quantity: number; setQuan
 }
 
 function AddToCart({ product, selectedVariant }: { product: ProductData; selectedVariant: ProductVariant | null }) {
+  const t = useText();
+  const content = useSiteContent();
   const { options, register, formProps, errors, pending } = useProductForm();
   const [quantity, setQuantity] = useState(1);
   const addable = canAddToCart(product, options);
-  const buttonText = addable ? "Add to bag" : selectedVariant ? "Sold out" : "Select options";
+  const buttonText = addable ? t("product.add_to_bag") : selectedVariant ? t("product.sold_out") : t("product.select_options");
+  const shipping = content ? freeShippingMessage(t, content.settings, selectedVariant?.price.currencyCode) : "";
 
   return (
     <>
       <form {...formProps({ afterSubmit: openCartDrawer })} className="flex flex-wrap gap-3">
         <QuantitySelector quantity={quantity} setQuantity={setQuantity} />
         <input type="hidden" {...register("merchandiseId", {})} />
-        <button
-          {...register("addToCart", {})}
-          className="pw-btn pw-btn--primary min-w-[200px] flex-1"
-          disabled={!addable || pending}
-          data-testid="add-to-cart"
-        >
+        <button {...register("addToCart", {})} className="pw-btn pw-btn--primary min-w-[200px] flex-1" disabled={!addable || pending} data-testid="add-to-cart">
           {buttonText}
         </button>
       </form>
-      <span className="text-muted text-[13px]">
-        Complimentary US shipping on orders over ${FREE_SHIPPING_THRESHOLD}.
-      </span>
+      {shipping ? <span className="text-muted text-[13px]">{shipping}</span> : null}
       {[...errors.userErrors, ...errors.warnings, ...errors.networkErrors].length ? (
         <div className="grid gap-1 text-sm" role="alert">
           {[...errors.userErrors, ...errors.warnings, ...errors.networkErrors].map((error) => (
@@ -631,18 +665,21 @@ function AddToCart({ product, selectedVariant }: { product: ProductData; selecte
   );
 }
 
-function Details({ title, size, extra }: { title: string; size: string; extra?: string }) {
+function Details({ data }: { data: View }) {
+  const t = useText();
+  const content = useSiteContent();
+  const settings = content?.settings;
+  const money = (n: number) => wholePrice({ amount: n.toFixed(2), currencyCode: data.product.priceRange.minVariantPrice.currencyCode });
+  const shipping =
+    settings?.freeShippingThreshold != null && settings.standardShippingRate != null
+      ? parseRich(t("product.shipping_returns_body", { free: money(settings.freeShippingThreshold), rate: money(settings.standardShippingRate) }))
+      : null;
   const items = [
-    {
-      title: "Details",
-      body: `${title} · ${size}. Plant-based personal care, as printed on the label.${extra ? ` ${extra}` : ""}`,
-    },
-    { title: "Ingredients", body: "[Ingredient list to confirm]" },
-    {
-      title: "Shipping & returns",
-      body: `Complimentary US standard shipping on orders of $${FREE_SHIPPING_THRESHOLD} and above; $8 below. Other options and international rates are calculated at checkout. [Returns policy to confirm]`,
-    },
-  ];
+    { title: t("product.details"), body: data.details },
+    { title: t("product.ingredients"), body: data.ingredients },
+    { title: t("product.shipping_returns"), body: shipping },
+  ].filter((item): item is { title: string; body: RichNode } => Boolean(item.body));
+  if (!items.length) return null;
   return (
     <div className="border-line border-b">
       {items.map((item, index) => (
@@ -656,171 +693,107 @@ function Details({ title, size, extra }: { title: string; size: string; extra?: 
               −
             </span>
           </summary>
-          <p className="text-muted max-w-[620px] pb-[22px] text-sm leading-[1.65]">{item.body}</p>
+          <RichText node={item.body} className="text-muted flex max-w-[620px] flex-col gap-3 pb-[22px] text-sm leading-[1.65]" />
         </details>
       ))}
     </div>
   );
 }
 
-// Shopify descriptions open with "Title · size." which the page already shows.
-function introFor(product: ProductData) {
-  const text = product.description.replace(/^[^.]*·[^.]*\.\s*/, "").trim();
-  return text || "A Plainwell everyday essential for your body, your bathroom, and the people you share it with.";
+function Stars({ value, max, className }: { value: number; max: number; className?: string }) {
+  const full = Math.round(value);
+  return (
+    <span aria-hidden="true" className={`tracking-[2px] ${className ?? ""}`}>
+      {"★".repeat(full)}
+      <span className="text-line">{"★".repeat(Math.max(0, max - full))}</span>
+    </span>
+  );
 }
 
-function eyebrowFor(data: PageData) {
-  const category = data.category ? CATEGORY_LABEL[data.category].label : "Plainwell";
-  return [category, data.scent ? SCENT_LABEL[data.scent] : null].filter(Boolean).join(" · ");
-}
-
-function LiveInfo({ data }: { data: LiveData }) {
+function Info({ data }: { data: View }) {
+  const t = useText();
   const { product } = data;
   const { selectedVariant } = useProductForm();
-  const size = selectedVariant?.selectedOptions.find((o) => o.name === "Size")?.value ?? "";
+  const size = sizeOf(selectedVariant?.selectedOptions);
   const hasChoices = product.options.some((option) => option.optionValues.length > 1);
+  const eyebrow = [data.category?.title, data.scent?.name].filter(Boolean).join(" · ");
 
   return (
     <>
       <div className="flex flex-col gap-2.5">
-        <span className="pw-eyebrow">{eyebrowFor(data)}</span>
+        {eyebrow ? <span className="pw-eyebrow">{eyebrow}</span> : null}
         <h1 className="text-[clamp(34px,3.4vw,44px)] leading-[1.06] tracking-[-0.02em]">{product.title}</h1>
-        {data.scent ? <span className="text-muted text-[15px]">{SCENT_NOTE[data.scent]}</span> : null}
-        <a href="#reviews" className="inline-flex items-center gap-2.5 pt-1 text-[13px]">
-          <span aria-hidden="true" className="tracking-[2px]">
-            ★★★★★
-          </span>
-          <span className="pw-link">Sample reviews</span>
-        </a>
+        {data.scent?.note ? (
+          <span className="text-muted text-[15px]">{data.comingSoon ? t("card.coming_soon_note", { note: data.scent.note }) : data.scent.note}</span>
+        ) : null}
+        {data.rating && data.ratingCount > 0 ? (
+          <a href="#reviews" className="inline-flex items-center gap-2.5 pt-1 text-[13px]">
+            <Stars value={data.rating.value} max={data.rating.max} />
+            <span className="pw-link">{t("product.reviews_link", { rating: data.rating.value.toFixed(1), count: data.ratingCount })}</span>
+          </a>
+        ) : null}
       </div>
-      <p className="text-base leading-[1.65]">{introFor(product)}</p>
+      {product.description ? <p className="text-base leading-[1.65]">{product.description}</p> : null}
       <ScentSwitch data={data} />
       {hasChoices ? (
         <VariantOptions product={product} />
-      ) : (
+      ) : size ? (
         <div className="flex flex-col gap-2.5">
-          <span className="text-muted text-[13px]">Size</span>
+          <span className="text-muted text-[13px]">{product.options[0]?.name}</span>
           <span className="border-ink inline-flex h-10 items-center self-start border px-4 text-[13px]">{size}</span>
         </div>
-      )}
-      <PriceBlock product={product} selectedVariant={selectedVariant} />
-      <InventoryHint selectedVariant={selectedVariant} inventory={data.inventory} />
-      <div data-product-form className="flex flex-col gap-3">
-        <span className="sr-only" aria-live="polite" data-add-to-cart-status />
-        <AddToCart product={product} selectedVariant={selectedVariant} />
-      </div>
-      <Details title={product.title} size={size} />
-    </>
-  );
-}
-
-function ConceptInfo({ data, concept }: { data: PageData; concept: ConceptProduct }) {
-  return (
-    <>
-      <div className="flex flex-col gap-2.5">
-        <span className="pw-eyebrow">{eyebrowFor(data)}</span>
-        <h1 className="text-[clamp(34px,3.4vw,44px)] leading-[1.06] tracking-[-0.02em]">{concept.title}</h1>
-        <span className="text-muted text-[15px]">Coming soon · {SCENT_NOTE[concept.scent]}</span>
-      </div>
-      <p className="text-base leading-[1.65]">Coming soon to the Plainwell shelf.</p>
-      <ScentSwitch data={data} />
-      <div className="flex flex-col gap-2.5">
-        <span className="text-muted text-[13px]">Size</span>
-        <span className="border-ink inline-flex h-10 items-center self-start border px-4 text-[13px]">
-          {concept.size}
-          {concept.bottleRefills ? " · draft size" : ""}
-        </span>
-      </div>
-      <div className="border-line border-t pt-4 text-[22px] tracking-[-0.01em]">Price to come</div>
-      <div className="flex flex-col gap-3">
-        <button type="button" disabled className="pw-btn pw-btn--secondary w-full">
-          Coming soon
-        </button>
-        <span className="text-muted text-[13px]">
-          A new product on its way. Price, formula and availability are still to come.
-        </span>
-      </div>
-      <Details
-        title={concept.title}
-        size={concept.size}
-        extra={
-          concept.bottleRefills
-            ? `Refills a 16 fl oz bottle ${concept.bottleRefills === 2 ? "twice" : `${concept.bottleRefills} times`}. The 32 fl oz size is a draft.`
-            : undefined
-        }
-      />
-    </>
-  );
-}
-
-const SAMPLE_REVIEWS = [
-  { name: "Sample reviewer A.", household: "Household of 2", rating: 5, date: "Oct 9, 2026", body: "Sample review text. Two or three plain sentences in the customer’s own words, once real reviews are connected." },
-  { name: "Sample reviewer B.", household: "Household of 4+", rating: 5, date: "Oct 2, 2026", body: "Sample review text. A short note on texture and scent." },
-  { name: "Sample reviewer C.", household: "Just me", rating: 4, date: "Sep 27, 2026", body: "Sample review text. A four-star review with one small reservation, to show how mixed feedback reads." },
-];
-const SAMPLE_BARS: [number, number][] = [[5, 98], [4, 19], [3, 6], [2, 2], [1, 1]];
-
-// Layout for reviews, filled with clearly labelled sample content until a reviews app is connected.
-function Reviews({ title, live }: { title: string; live: boolean }) {
-  return (
-    <section id="reviews" className="pw-gutter flex scroll-mt-24 flex-col gap-10 pt-28" aria-labelledby="reviews-heading">
-      <div className="border-ink flex flex-wrap items-end justify-between gap-6 border-b pb-[22px]">
-        <div className="flex flex-col gap-2.5">
-          <span className="pw-eyebrow">Reviews · Sample content</span>
-          <h2 id="reviews-heading" className="pw-h2">
-            From the shared shelf
-          </h2>
-        </div>
-      </div>
-      {!live ? (
-        <p className="text-muted pb-6 text-base">Reviews open once {title} is available.</p>
+      ) : null}
+      {data.comingSoon ? (
+        <>
+          <div className="border-line border-t pt-4 text-[22px] tracking-[-0.01em]">{t("card.price_to_come")}</div>
+          <div className="flex flex-col gap-3">
+            <button type="button" disabled className="pw-btn pw-btn--secondary w-full">
+              {t("card.coming_soon")}
+            </button>
+            <span className="text-muted text-[13px]">{t("product.coming_soon_note")}</span>
+          </div>
+        </>
       ) : (
-        <div className="grid items-start gap-x-16 gap-y-10 lg:grid-cols-3">
-          <div className="flex max-w-[360px] flex-col gap-[22px]">
-            <div className="flex items-baseline gap-3.5">
-              <span className="text-[64px] leading-none tracking-[-0.03em]">4.7</span>
-              <span className="text-muted text-[13px]">out of 5 · sample</span>
-            </div>
-            <div className="flex flex-col gap-2 pt-1.5">
-              {SAMPLE_BARS.map(([stars, count]) => (
-                <div key={stars} className="grid grid-cols-[16px_1fr_36px] items-center gap-3 text-[13px]">
-                  <span>{stars}</span>
-                  <div className="bg-line relative h-0.5">
-                    <div className="bg-ink absolute inset-y-0 left-0" style={{ width: `${Math.round((count / 98) * 100)}%` }} />
-                  </div>
-                  <span className="text-muted text-right">{count}</span>
-                </div>
-              ))}
-            </div>
+        <>
+          <PriceBlock product={product} selectedVariant={selectedVariant} />
+          <InventoryHint selectedVariant={selectedVariant} inventory={data.inventory} />
+          <div data-product-form className="flex flex-col gap-3">
+            <span className="sr-only" aria-live="polite" data-add-to-cart-status />
+            <AddToCart product={product} selectedVariant={selectedVariant} />
           </div>
-          <div className="flex min-w-0 flex-col lg:col-span-2">
-            {SAMPLE_REVIEWS.map((review) => (
-              <article key={review.name} className="border-line grid gap-x-8 gap-y-3 border-b py-7 sm:grid-cols-3">
-                <div className="flex flex-col gap-1">
-                  <span className="font-medium">{review.name}</span>
-                  <span className="text-muted pt-1.5 text-[13px]">{review.household}</span>
-                </div>
-                <div className="flex min-w-0 flex-col gap-2 sm:col-span-2">
-                  <div className="flex justify-between gap-4">
-                    <span role="img" aria-label={`${review.rating} out of 5 stars`} className="tracking-[2px]">
-                      {"★".repeat(review.rating)}
-                      <span className="text-line">{"★".repeat(5 - review.rating)}</span>
-                    </span>
-                    <span className="text-muted text-[13px]">{review.date}</span>
-                  </div>
-                  <span className="font-medium">Sample review headline</span>
-                  <p className="max-w-[620px] leading-[1.65]">{review.body}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
+        </>
       )}
+      <Details data={data} />
+    </>
+  );
+}
+
+// Real ratings only: Shopify's standard reviews.rating and reviews.rating_count metafields,
+// filled by a reviews app. Nothing renders until a product has reviews.
+function Reviews({ data }: { data: View }) {
+  const t = useText();
+  if (!data.rating || data.ratingCount <= 0) return null;
+  return (
+    <section id="reviews" className="pw-gutter flex scroll-mt-24 flex-col gap-6 pt-28" aria-labelledby="reviews-heading">
+      <div className="border-ink border-b pb-[22px]">
+        <h2 id="reviews-heading" className="pw-h2">
+          {t("product.reviews_heading")}
+        </h2>
+      </div>
+      <div className="flex items-baseline gap-3.5">
+        <span className="text-[64px] leading-none tracking-[-0.03em]">{data.rating.value.toFixed(1)}</span>
+        <span className="text-muted text-[13px]">{t("product.rating_out_of", { max: data.rating.max })}</span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Stars value={data.rating.value} max={data.rating.max} className="text-lg" />
+        <span className="text-muted text-[13px]">{t(data.ratingCount === 1 ? "product.rating_count_one" : "product.rating_count_other", { count: data.ratingCount })}</span>
+      </div>
     </section>
   );
 }
 
-function ProductJsonLd({ data }: { data: LiveData }) {
+function ProductJsonLd({ data }: { data: View }) {
+  const t = useText();
   const { product } = data;
   const variant = product.selectedOrFirstAvailableVariant;
   const jsonLd = {
@@ -830,25 +803,28 @@ function ProductJsonLd({ data }: { data: LiveData }) {
     description: product.description,
     image: product.featuredImage?.url,
     sku: variant?.sku || undefined,
-    brand: { "@type": "Brand", name: product.vendor || "Plainwell Body Co." },
-    offers: variant
-      ? {
-          "@type": "Offer",
-          url: `${data.origin}/products/${product.handle}`,
-          price: variant.price.amount,
-          priceCurrency: variant.price.currencyCode,
-          availability: variant.availableForSale ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-        }
-      : undefined,
+    brand: { "@type": "Brand", name: product.vendor },
+    offers:
+      variant && !data.comingSoon
+        ? {
+            "@type": "Offer",
+            url: `${data.origin}/products/${product.handle}`,
+            price: variant.price.amount,
+            priceCurrency: variant.price.currencyCode,
+            availability: variant.availableForSale ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+          }
+        : undefined,
+    aggregateRating:
+      data.rating && data.ratingCount > 0
+        ? { "@type": "AggregateRating", ratingValue: data.rating.value, bestRating: data.rating.max, reviewCount: data.ratingCount }
+        : undefined,
   };
   const crumbs = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Shop all", item: `${data.origin}/collections/all` },
-      ...(data.category
-        ? [{ "@type": "ListItem", position: 2, name: CATEGORY_LABEL[data.category].label, item: `${data.origin}${CATEGORY_LABEL[data.category].href}` }]
-        : []),
+      { "@type": "ListItem", position: 1, name: t("product.breadcrumb_all"), item: `${data.origin}/collections/all` },
+      ...(data.category ? [{ "@type": "ListItem", position: 2, name: data.category.title, item: `${data.origin}${data.category.url}` }] : []),
       { "@type": "ListItem", position: data.category ? 3 : 2, name: product.title },
     ],
   };
@@ -860,59 +836,70 @@ function ProductJsonLd({ data }: { data: LiveData }) {
   );
 }
 
-function ProductPage({ data, info }: { data: PageData; info: ReactNode }) {
-  const title = data.kind === "live" ? data.product.title : data.concept.title;
-  const ritual = ritualFor(data.scent as Scent | null, data.family);
+function ProductPage({ data }: { data: View }) {
+  const t = useText();
+  const { product } = data;
+  const image = product.featuredImage;
 
   return (
     <main className="flex-1" id="main-content" tabIndex={-1}>
-      <nav aria-label="Breadcrumb" className="pw-gutter text-muted flex flex-wrap gap-2 py-5 text-[13px]">
+      <nav aria-label={t("product.breadcrumb_label")} className="pw-gutter text-muted flex flex-wrap gap-2 py-5 text-[13px]">
         <Link to="/collections/all" className="pw-hover">
-          Shop all
+          {t("product.breadcrumb_all")}
         </Link>
         {data.category ? (
           <>
             <span aria-hidden="true">/</span>
-            <Link to={CATEGORY_LABEL[data.category].href} className="pw-hover">
-              {CATEGORY_LABEL[data.category].label}
+            <Link to={data.category.url} className="pw-hover">
+              {data.category.title}
             </Link>
           </>
         ) : null}
         <span aria-hidden="true">/</span>
         <span className="text-ink" aria-current="page">
-          {title}
+          {product.title}
         </span>
       </nav>
       <section className="border-line grid items-start border-t md:grid-cols-2">
         <div className="bg-shelf border-line aspect-[4/5] md:col-start-1 md:row-start-1 md:border-r">
-          <ProductImage data={data} />
+          {image ? (
+            <img
+              src={shopifyImageUrl(image.url, 900)}
+              srcSet={shopifySrcSet(image.url, GALLERY_WIDTHS)}
+              sizes={GALLERY_SIZES}
+              alt={image.altText || product.title}
+              width={1000}
+              height={1250}
+              fetchPriority="high"
+              className="h-full w-full object-cover"
+            />
+          ) : null}
         </div>
         <div className="flex max-w-[620px] flex-col gap-7 px-5 pt-10 pb-14 md:sticky md:top-[var(--spacing-header)] md:col-start-2 md:row-span-2 md:row-start-1 md:px-[clamp(24px,5vw,88px)] md:pt-14 md:pb-[72px]">
-          {info}
+          <Info data={data} />
         </div>
-        <div className="bg-olive border-line aspect-[4/5] border-t md:col-start-1 md:row-start-2 md:border-r">
-          <Media
-            name={ritual.name}
-            alt={ritual.alt}
-            sizes={GALLERY_SIZES}
-            width={1254}
-            height={1254}
-            className="h-full w-full object-cover"
-          />
-        </div>
+        {data.ritual ? (
+          <div className="bg-olive border-line aspect-[4/5] border-t md:col-start-1 md:row-start-2 md:border-r">
+            <ShopifyImage image={data.ritual} sizes={GALLERY_SIZES} className="h-full w-full object-cover" />
+          </div>
+        ) : null}
       </section>
-      <Reviews title={title} live={data.kind === "live"} />
-      <section className="pt-28 pb-28" aria-labelledby="pairs-heading">
-        <div className="pw-gutter flex items-baseline justify-between gap-4 pb-[22px]">
-          <h2 id="pairs-heading" className="pw-section-label">
-            Pairs well with
-          </h2>
-          <Link to="/collections/all" className="pw-link">
-            Shop all
-          </Link>
-        </div>
-        <ProductGrid items={data.pairs as CardItem[]} />
-      </section>
+      <Reviews data={data} />
+      {data.pairs.length ? (
+        <section className="pt-28 pb-28" aria-labelledby="pairs-heading">
+          <div className="pw-gutter flex items-baseline justify-between gap-4 pb-[22px]">
+            <h2 id="pairs-heading" className="pw-section-label">
+              {t("product.pairs_heading")}
+            </h2>
+            <Link to="/collections/all" className="pw-link">
+              {t("product.pairs_link")}
+            </Link>
+          </div>
+          <ProductGrid items={data.pairs} />
+        </section>
+      ) : (
+        <div className="h-28" />
+      )}
     </main>
   );
 }
@@ -920,24 +907,24 @@ function ProductPage({ data, info }: { data: PageData; info: ReactNode }) {
 export default function ProductRoute({ loaderData }: Route.ComponentProps) {
   const navigate = useNavigate();
   const location = useLocation();
-
-  if (loaderData.kind === "concept") {
-    return <ProductPage data={loaderData} info={<ConceptInfo data={loaderData} concept={loaderData.concept} />} />;
-  }
-
+  const content = useSiteContent();
   const { product } = loaderData;
+  // The breadcrumb category: the first of the product's collections in the shop-categories menu.
+  const categories = content?.menus.categories ?? [];
+  const category =
+    product.collections.nodes
+      .map((c) => ({ title: c.title, url: `/collections/${c.handle}` }))
+      .find((c) => categories.some((m) => m.url.split("?")[0] === c.url)) ?? null;
+  const data: View = {
+    ...loaderData,
+    category: category ? { ...category, title: categories.find((m) => m.url.split("?")[0] === category.url)?.title ?? category.title } : null,
+  };
+
   return (
     <ProductProvider
       product={product}
       onSelect={(result) => {
-        const url = toRouterLocation(
-          variantUrl(
-            product,
-            result.selectedOptions,
-            result.selectedVariant?.product?.handle,
-            new URLSearchParams(location.search),
-          ),
-        );
+        const url = toRouterLocation(variantUrl(product, result.selectedOptions, result.selectedVariant?.product?.handle, new URLSearchParams(location.search)));
         void navigate(url, {
           replace: true,
           preventScrollReset: true,
@@ -946,8 +933,8 @@ export default function ProductRoute({ loaderData }: Route.ComponentProps) {
       }}
     >
       <ProductViewedTracker product={product} />
-      <ProductJsonLd data={loaderData} />
-      <ProductPage data={loaderData} info={<LiveInfo data={loaderData} />} />
+      <ProductJsonLd data={data} />
+      <ProductPage data={data} />
     </ProductProvider>
   );
 }

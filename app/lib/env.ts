@@ -9,6 +9,8 @@ export type Env = {
   PUBLIC_CUSTOMER_ACCOUNT_API_CLIENT_ID?: string;
   SESSION_SECRET?: string;
   SHOP_ID?: string;
+  /** Optional: the storefront's canonical origin, e.g. https://plainwellbody.com. */
+  PUBLIC_CANONICAL_ORIGIN?: string;
   /** Admin API token for the newsletter and contact forms. Server only. */
   SHOPIFY_ADMIN_API_TOKEN?: string;
   /** Dev Dashboard app credentials. Server only; used to renew 24-hour tokens. */

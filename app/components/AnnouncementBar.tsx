@@ -1,10 +1,14 @@
-import { FREE_SHIPPING_THRESHOLD } from "~/lib/plainwell";
+import { useSiteContent, useText } from "~/lib/text";
 
-// Keep in sync with the store's shipping profile: US standard is free at $50 and up.
+// Site settings › Announcement bar. Nothing renders when it is empty.
 export function AnnouncementBar() {
+  const content = useSiteContent();
+  const t = useText();
+  const message = content?.settings.announcement;
+  if (!message) return null;
   return (
-    <div role="region" aria-label="Announcement" className="bg-ink px-5 py-2.5 text-center text-xs tracking-[0.04em] text-white">
-      Complimentary US shipping on orders over ${FREE_SHIPPING_THRESHOLD}.
+    <div role="region" aria-label={t("a11y.announcement")} className="bg-ink px-5 py-2.5 text-center text-xs tracking-[0.04em] text-white">
+      {message}
     </div>
   );
 }

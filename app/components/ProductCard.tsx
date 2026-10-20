@@ -2,20 +2,11 @@ import { gql, type StorefrontApi } from "@shopify/hydrogen";
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { Link } from "react-router";
 
-import { Media } from "~/components/Media";
 import { useCartForm } from "~/lib/cart";
 import { openCartDrawer } from "~/lib/cart-drawer";
 import { shopifyImageUrl, shopifySrcSet } from "~/lib/images";
 import { wholePrice } from "~/lib/money";
-import {
-  type ConceptProduct,
-  categoryOf,
-  familyOf,
-  SCENT_NOTE,
-  scentOf,
-  type CategoryKey,
-  type Scent,
-} from "~/lib/plainwell";
+import { useText } from "~/lib/text";
 
 export const PRODUCT_CARD_FRAGMENT = gql(`
   fragment ProductCard on Product {
@@ -54,6 +45,28 @@ export const PRODUCT_CARD_FRAGMENT = gql(`
         altText
       }
     }
+    scent: metafield(namespace: "plainwell", key: "scent") {
+      reference {
+        ... on Metaobject {
+          handle
+          name: field(key: "name") {
+            value
+          }
+          note: field(key: "note") {
+            value
+          }
+          sort: field(key: "sort") {
+            value
+          }
+        }
+      }
+    }
+    family: metafield(namespace: "plainwell", key: "family") {
+      value
+    }
+    comingSoon: metafield(namespace: "plainwell", key: "coming_soon") {
+      value
+    }
   }
 `);
 
@@ -66,52 +79,49 @@ export type ProductCardData = StorefrontApi.ResultOf<
   typeof PRODUCT_CARD_SHAPE_QUERY
 >["products"]["nodes"][number];
 
-/** One card in a grid: a live Shopify product, or a coming-soon product with no price. */
+/** One card in a grid, from Shopify product data and its Plainwell metafields. */
 export type CardItem = {
   handle: string;
   title: string;
+  /** The scent family's note, e.g. "Bright, clean, morning". */
   note: string;
   size: string;
-  scent: Scent | null;
+  scent: { handle: string; name: string; sort: number } | null;
   family: string;
-  category: CategoryKey | null;
-  live: ProductCardData | null;
+  comingSoon: boolean;
+  live: ProductCardData;
 };
 
-export function cardFromProduct(product: ProductCardData): CardItem {
-  const scent = scentOf(product.tags);
-  const variant = product.selectedOrFirstAvailableVariant;
-  return {
-    handle: product.handle,
-    title: product.title,
-    note: scent ? SCENT_NOTE[scent] : "",
-    size: variant?.selectedOptions.find((o) => o.name === "Size")?.value ?? "",
-    scent,
-    family: familyOf(product.handle),
-    category: categoryOf(product.tags, product.productType),
-    live: product,
-  };
+type ScentRef = { handle?: string; name?: { value?: string | null } | null; note?: { value?: string | null } | null; sort?: { value?: string | null } | null };
+
+/** The first real option value (e.g. "16 fl oz"); Shopify's placeholder "Default Title" is skipped. */
+export function sizeOf(options: readonly { name: string; value: string }[] | undefined) {
+  return options?.find((o) => o.value !== "Default Title")?.value ?? "";
 }
 
-export function cardFromConcept(product: ConceptProduct): CardItem {
+export function cardFromProduct(product: ProductCardData): CardItem {
+  const ref = product.scent?.reference as ScentRef | null | undefined;
+  const scent = ref?.handle ? { handle: ref.handle, name: ref.name?.value ?? "", sort: Number(ref.sort?.value ?? 999) } : null;
   return {
     handle: product.handle,
     title: product.title,
-    note: `Coming soon · ${SCENT_NOTE[product.scent]}`,
-    size: product.size,
-    scent: product.scent,
-    family: product.family,
-    category: product.category,
-    live: null,
+    note: ref?.note?.value ?? "",
+    size: sizeOf(product.selectedOrFirstAvailableVariant?.selectedOptions),
+    scent,
+    family: product.family?.value ?? "",
+    comingSoon: product.comingSoon?.value === "true",
+    live: product,
   };
 }
 
 const CARD_SIZES = "(min-width: 64rem) 25vw, 50vw";
 
 export function ProductCard({ item, priority = false }: { item: CardItem; priority?: boolean }) {
+  const t = useText();
   const product = item.live;
-  const image = product?.featuredImage;
-  const price = product?.selectedOrFirstAvailableVariant?.price ?? product?.priceRange.minVariantPrice;
+  const image = product.featuredImage;
+  const price = product.selectedOrFirstAvailableVariant?.price ?? product.priceRange.minVariantPrice;
+  const note = item.comingSoon && item.note ? t("card.coming_soon_note", { note: item.note }) : item.note;
 
   return (
     <article className="pw-card" data-testid="product-card" aria-label={item.title}>
@@ -128,9 +138,7 @@ export function ProductCard({ item, priority = false }: { item: CardItem; priori
             fetchPriority={priority ? "high" : undefined}
             decoding="async"
           />
-        ) : (
-          <Media name={`pack-${item.handle}`} alt="" sizes={CARD_SIZES} width={1000} height={1250} />
-        )}
+        ) : null}
       </Link>
       <div className="pw-card__body">
         <h3 className="font-medium">
@@ -138,15 +146,15 @@ export function ProductCard({ item, priority = false }: { item: CardItem; priori
             {item.title}
           </Link>
         </h3>
-        {item.note ? <p className="text-muted">{item.note}</p> : null}
+        {note ? <p className="text-muted">{note}</p> : null}
         <div className="pw-card__meta">
           <span className="text-muted">{item.size}</span>
-          <span>{price ? wholePrice(price) : "Price to come"}</span>
+          <span>{item.comingSoon ? t("card.price_to_come") : wholePrice(price)}</span>
         </div>
-        {product ? (
-          <AddToBag product={product} />
+        {item.comingSoon ? (
+          <span className="pw-card__cta pw-card__cta--soon">{t("card.coming_soon")}</span>
         ) : (
-          <span className="pw-card__cta pw-card__cta--soon">Coming soon</span>
+          <AddToBag product={product} />
         )}
       </div>
     </article>
@@ -157,6 +165,7 @@ export function ProductCard({ item, priority = false }: { item: CardItem; priori
 let pendingAdd: Promise<unknown> = Promise.resolve();
 
 function AddToBag({ product }: { product: ProductCardData }) {
+  const t = useText();
   const variant = product.selectedOrFirstAvailableVariant;
   const { formProps } = useCartForm();
   const [state, setState] = useState<"idle" | "adding" | "added">("idle");
@@ -218,8 +227,8 @@ function AddToBag({ product }: { product: ProductCardData }) {
         disabled={!available}
         data-pending={state === "adding" ? "" : undefined}
       >
-        {!available ? "Sold out" : state === "added" ? "Added ✓" : "Add to bag"}
-        <span className="sr-only">: {product.title}</span>
+        {!available ? t("card.sold_out") : state === "added" ? t("card.added") : t("card.add_to_bag")}
+        <span className="sr-only">{t("card.add_to_bag_sr", { title: product.title })}</span>
       </button>
     </form>
   );

@@ -17,11 +17,15 @@ import { CartDrawer } from "~/components/CartDrawer";
 import { Footer } from "~/components/Footer";
 import { ErrorPage } from "~/components/ErrorPage";
 import { Header } from "~/components/Header";
+import { RouteAnnouncer } from "~/components/RouteAnnouncer";
 import { SearchDrawer } from "~/components/SearchDrawer";
 import { CartProvider } from "~/lib/cart";
 import { cartHandlers } from "~/lib/cart-handlers";
 import { createRequestCustomerAccount, customerAccountContext } from "~/lib/customer-account";
+import { setClientText } from "~/lib/client-text";
+import { loadSiteContent, format } from "~/lib/content";
 import { envContext } from "~/lib/env";
+import { shopifyImageUrl } from "~/lib/images";
 import { predictiveSearchHandlers } from "~/lib/predictive-search-handlers";
 import { loadRootLayout } from "~/lib/root-layout";
 import { routeTemplates } from "~/lib/route-templates";
@@ -42,7 +46,6 @@ import appStylesHref from "./app.css?url";
 export const links: Route.LinksFunction = () => [
   { rel: "preload", href: fontHref, as: "font", type: "font/woff2", crossOrigin: "anonymous" },
   { rel: "stylesheet", href: appStylesHref },
-  { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
 ];
 
 export const middleware: Route.MiddlewareFunction[] = [
@@ -97,29 +100,50 @@ export const middleware: Route.MiddlewareFunction[] = [
 export async function loader({ context, request }: Route.LoaderArgs) {
   const env = context.get(envContext);
   const storefrontClient = context.get(storefrontClientContext);
-  const [cartResult, layout] = await Promise.all([
+  const [cartResult, layout, content] = await Promise.all([
     cartHandlers.get({ storefrontClient, request }),
     loadRootLayout(storefrontClient),
+    loadSiteContent(storefrontClient, [env.PUBLIC_STORE_DOMAIN, new URL(request.url).hostname]),
   ]);
 
   return {
     cartData: cartResult.data,
     shopInfo: layout.shopInfo,
+    // Canonical and share URLs. Not Shopify's "primary domain": on a headless store that is
+    // the checkout host (checkout.plainwellbody.com). PUBLIC_CANONICAL_ORIGIN pins it when
+    // the site is reachable on more than one host.
+    primaryOrigin: (env.PUBLIC_CANONICAL_ORIGIN || new URL(request.url).origin).replace(/\/$/, ""),
     shopIdentity: resolveShopIdentity(env, layout.shopId),
     currency: layout.currency,
+    content,
   };
+}
+
+// Shared content (text, settings, menus) and shop identity don't change between pages, and
+// the cart lives in its client store after the first load; skip reloading them on navigation.
+export function shouldRevalidate() {
+  return false;
 }
 
 export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   // Absent when the root loader failed (error page only).
   const rootData = useRouteLoaderData<typeof loader>("root");
+  if (rootData) setClientText(rootData.content.text);
 
   return (
     <html lang="en">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#f6f4ef" />
+        {rootData?.content.settings.icon ? (
+          <>
+            <link rel="icon" type="image/png" sizes="48x48" href={shopifyImageUrl(rootData.content.settings.icon.url, 48, 48)} />
+            <link rel="icon" type="image/png" sizes="192x192" href={shopifyImageUrl(rootData.content.settings.icon.url, 192, 192)} />
+            <link rel="apple-touch-icon" href={shopifyImageUrl(rootData.content.settings.icon.url, 180, 180)} />
+          </>
+        ) : null}
         {rootData ? (
           <ShopifyScripts
             i18n={{ ...storefrontConfig.i18n, currency: rootData.currency }}
@@ -135,12 +159,14 @@ export function Layout({ children }: { children: ReactNode }) {
         <Links />
       </head>
       <body className="bg-paper text-ink font-body flex min-h-svh flex-col antialiased">
-        <a
-          href="#main-content"
-          className="focus-visible:bg-interactive focus-visible:text-interactive-text sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:start-4 focus-visible:top-4 focus-visible:z-50 focus-visible:rounded focus-visible:px-4 focus-visible:py-2"
-        >
-          Skip to content
-        </a>
+        {rootData ? (
+          <a
+            href="#main-content"
+            className="focus-visible:bg-interactive focus-visible:text-interactive-text sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:start-4 focus-visible:top-4 focus-visible:z-50 focus-visible:rounded focus-visible:px-4 focus-visible:py-2"
+          >
+            {format(rootData.content.text, "a11y.skip_to_content")}
+          </a>
+        ) : null}
         {children}
         <ScrollRestoration />
         <Scripts />
@@ -153,6 +179,7 @@ export default function App({ loaderData }: Route.ComponentProps) {
   return (
     <CartProvider initialData={loaderData.cartData}>
       <PageViewedTracker />
+      <RouteAnnouncer />
       <CartAnalyticsTracker />
       <AnnouncementBar />
       <Header shopName={loaderData.shopInfo.name} />

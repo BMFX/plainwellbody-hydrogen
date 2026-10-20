@@ -10,9 +10,12 @@ type SuggestionSummary = {
  * announced: the store flips to `loading` on every keystroke, and announcing
  * that would talk over the typist.
  */
-export function describeSuggestions({ status, result }: SuggestionSummary): string {
+export function describeSuggestions(
+  { status, result }: SuggestionSummary,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
   if (status !== "success") return "";
   const count = result.items.products.length;
-  if (count === 0) return `No suggestions for “${result.term}”`;
-  return `${count} ${count === 1 ? "suggestion" : "suggestions"} for “${result.term}”`;
+  if (count === 0) return t("search.drawer.none", { term: result.term });
+  return t(count === 1 ? "search.drawer.count_one" : "search.drawer.count_other", { count, term: result.term });
 }

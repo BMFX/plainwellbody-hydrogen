@@ -1,263 +1,143 @@
-import {
-  AnalyticsEvent,
-  createPredictiveSearchFormRegister,
-  getSortByValue,
-} from "@shopify/hydrogen";
-import { CollectionProvider } from "@shopify/hydrogen/react";
+import { AnalyticsEvent, createPredictiveSearchFormRegister } from "@shopify/hydrogen";
 import { useEffect } from "react";
-import { Link, useLocation, useNavigate, useNavigation, useSearchParams } from "react-router";
+import { Form, Link, useNavigation, useSubmit } from "react-router";
 
-import {
-  ActiveFilterChips,
-  FacetForm,
-  FilterDrawer,
-  LoadMore,
-  SEARCH_SORT_OPTIONS,
-  Toolbar,
-  useLoadMore,
-} from "~/components/CollectionBrowse";
-import { cardFromProduct, ProductGrid as CardGrid } from "~/components/ProductCard";
-import { loadSearchPage, type SearchPageData } from "~/lib/search";
+import { ProductGrid } from "~/components/ProductCard";
+import { loadSearch, SEARCH_SORTS, type SearchSort } from "~/lib/search";
+import { seoMeta } from "~/lib/seo";
 import { storefrontClientContext } from "~/lib/storefront";
-import { formatPageTitle, getShopNameFromRootMatch } from "~/lib/storefront-shop";
+import { useSiteContent, useText } from "~/lib/text";
 
 import type { Route } from "./+types/search";
 
-export function meta({ matches }: Route.MetaArgs) {
-  const shopName = getShopNameFromRootMatch(matches[0]);
-  return [
-    { title: formatPageTitle("Search", shopName) },
-    {
-      name: "description",
-      content: `Search products at ${shopName}.`,
-    },
-  ];
+const SORT_KEYS: Record<SearchSort, string> = {
+  relevance: "search.sort.relevance",
+  "price-asc": "collection.sort.price_asc",
+  "price-desc": "collection.sort.price_desc",
+};
+
+export function meta({ matches, location }: Route.MetaArgs) {
+  const text = (matches[0]?.data as { content?: { text: Record<string, string> } } | undefined)?.content?.text ?? {};
+  const term = new URLSearchParams(location.search).get("q")?.trim();
+  // Results pages are endless near-duplicates; keep them out of the index, follow their links.
+  return seoMeta(matches[0], {
+    title: term ? (text["seo.search_title"] ?? "").replace("{term}", term) : (text["nav.search"] ?? ""),
+    description: text["seo.search_description"] ?? null,
+    path: "/search",
+    noindex: true,
+  });
 }
 
 export async function loader({ context, request }: Route.LoaderArgs) {
-  const storefrontClient = context.get(storefrontClientContext);
-  return loadSearchPage({ storefrontClient, request });
+  return loadSearch(context.get(storefrontClientContext), new URL(request.url));
 }
-
-type PerformedSearchData = Extract<SearchPageData, { performed: true }>;
-type ProductNode = PerformedSearchData["products"][number];
-
-function SearchViewedTracker({
-  searchTerm,
-  totalCount,
-}: {
-  searchTerm: string;
-  totalCount: number;
-}) {
-  useEffect(() => {
-    if (!searchTerm) return;
-
-    window.Shopify?.analytics?.publish(AnalyticsEvent.SEARCH_VIEWED, {
-      searchTerm,
-      searchResults: { totalCount },
-    });
-  }, [searchTerm, totalCount]);
-
-  return null;
-}
-
-function BreadcrumbJsonLd({ origin }: { origin: string }) {
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      {
-        "@type": "ListItem",
-        position: 1,
-        name: "Home",
-        item: `${origin}/`,
-      },
-      {
-        "@type": "ListItem",
-        position: 2,
-        name: "Search",
-        item: `${origin}/search`,
-      },
-    ],
-  };
-
-  return <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>;
-}
-
 
 const registerSearchForm = createPredictiveSearchFormRegister();
 
-const SUGGESTIONS = ["Citrus", "Cedar", "Unscented", "Hand balm", "Travel"];
+export default function SearchRoute({ loaderData }: Route.ComponentProps) {
+  const { term, sort, items, totalCount, nextCursor } = loaderData;
+  const t = useText();
+  const content = useSiteContent();
+  const submit = useSubmit();
+  const navigation = useNavigation();
+  const updating = navigation.state === "loading" && navigation.location?.pathname === "/search";
 
-function SearchHeader({ term }: { term: string }) {
+  useEffect(() => {
+    if (term) window.Shopify?.analytics?.publish(AnalyticsEvent.SEARCH_VIEWED, { searchTerm: term, searchResults: { totalCount } });
+  }, [term, totalCount]);
+
   return (
-    <section className="pw-gutter flex flex-col gap-7 pt-14 pb-10 md:pt-[72px]">
-      <span className="pw-eyebrow">Search</span>
-      <h1 className="pw-h1">Find your everyday.</h1>
-      <form action="/search" method="get" role="search" aria-label="Search" className="border-ink flex max-w-[720px] items-center gap-4 border-b">
-        <label htmlFor="search-q" className="sr-only">
-          Search products
-        </label>
+    <main className="flex-1" id="main-content" tabIndex={-1}>
+      <section className="pw-gutter flex flex-col gap-7 pt-14 pb-10 md:pt-[72px]">
+        <span className="pw-eyebrow">{t("search.eyebrow")}</span>
+        <h1 className="pw-h1">{t("search.heading")}</h1>
+        <form action="/search" method="get" role="search" aria-label={t("nav.search")} className="border-ink flex max-w-[720px] items-center gap-4 border-b">
+          <label htmlFor="search-q" className="sr-only">
+            {t("search.input_label")}
+          </label>
           <input
             key={term}
             {...registerSearchForm("query")}
             id="search-q"
             defaultValue={term}
-            placeholder="Search products"
+            placeholder={t("search.input_label")}
             className="!h-16 min-w-0 flex-1 !border-0 !bg-transparent !px-0 text-[28px] tracking-[-0.015em] max-sm:text-[22px]"
           />
-        {term ? (
-          <Link to="/search" className="text-muted shrink-0 text-[13px] underline underline-offset-4">
-            Clear
-          </Link>
-        ) : null}
-      </form>
-      <nav aria-label="Suggestions" className="flex flex-wrap gap-2">
-        {SUGGESTIONS.map((label) => {
-          const active = label.toLowerCase() === term.trim().toLowerCase();
-          return (
-            <Link
-              key={label}
-              to={`/search?q=${encodeURIComponent(label.toLowerCase())}`}
-              aria-current={active ? "true" : undefined}
-              className={`inline-flex h-10 items-center border px-4 text-[13px] ${active ? "border-ink" : "border-line hover:border-ink"}`}
-            >
-              {label}
+          {term ? (
+            <Link to="/search" className="text-muted shrink-0 text-[13px] underline underline-offset-4">
+              {t("search.clear")}
             </Link>
-          );
-        })}
-      </nav>
-    </section>
-  );
-}
-
-function searchTermHiddenInput(term: string) {
-  return <input type="hidden" name="q" value={term} />;
-}
-
-function ProductGrid({ products }: { products: readonly ProductNode[] }) {
-  return <CardGrid items={products.map(cardFromProduct)} priorityCount={2} columns={3} />;
-}
-
-function NoResults({ term }: { term: string }) {
-  return (
-    <div aria-live="polite" className="border-line flex flex-col items-center gap-3.5 border-y py-24 text-center">
-      <h2 className="pw-title">No matches for “{term}”.</h2>
-      <p className="text-muted">Try a product name or a scent family.</p>
-      <Link to="/collections/all" className="pw-link">
-        Explore your essentials
-      </Link>
-    </div>
-  );
-}
-
-function SearchResults({ loaderData }: { loaderData: PerformedSearchData }) {
-  const location = useLocation();
-  const navigation = useNavigation();
-  const isUpdating =
-    navigation.state === "loading" &&
-    navigation.location?.pathname === location.pathname &&
-    navigation.location.search !== location.search;
-  const { nodes, pageInfo, isLoading, loadMore } = useLoadMore(
-    loaderData.products,
-    loaderData.pageInfo,
-    loaderData.dataSearch,
-  );
-  const defaultSortValue = getSortByValue("RELEVANCE", false);
-  const countText = `${nodes.length} results found for “${loaderData.searchTerm}”`;
-  const searchPath = `/search?q=${encodeURIComponent(loaderData.searchTerm)}`;
-  const hiddenQuery = searchTermHiddenInput(loaderData.searchTerm);
-
-  if (nodes.length === 0) return <NoResults term={loaderData.searchTerm} />;
-
-  return (
-    <>
-      <div className="lg:grid lg:grid-cols-[15rem_1fr] lg:gap-10">
-        <aside className="hidden lg:block" aria-label="Filters">
-          <div className="sticky top-8">
-            <h2 className="type-heading-sm text-on-surface mb-2">Filters</h2>
-            <FacetForm
-              availableFilters={loaderData.availableFilters}
-              currencyCode={loaderData.currencyCode}
-              extraHiddenInputs={searchTermHiddenInput(loaderData.searchTerm)}
-            />
-          </div>
-        </aside>
-        <div>
-          <Toolbar
-            countText={countText}
-            sortOptions={SEARCH_SORT_OPTIONS}
-            defaultSortValue={defaultSortValue}
-            extraHiddenInputs={hiddenQuery}
-          />
-          <ActiveFilterChips
-            basePath={searchPath}
-            clearAllTo={searchPath}
-            currencyCode={loaderData.currencyCode}
-          />
-          <h2 className="sr-only">Search results</h2>
-          <div
-            aria-busy={isUpdating}
-            className={`motion-safe:transition-opacity motion-safe:duration-150 ${isUpdating ? "opacity-60" : "opacity-100"}`}
-          >
-            <ProductGrid products={nodes} />
-          </div>
-          <LoadMore
-            pageInfo={pageInfo}
-            loadedCount={nodes.length}
-            countLabel={`Showing ${nodes.length} of ${loaderData.totalCount} results`}
-            isLoading={isLoading}
-            onLoad={loadMore}
-          />
-        </div>
-      </div>
-      <FilterDrawer
-        availableFilters={loaderData.availableFilters}
-        currencyCode={loaderData.currencyCode}
-        extraHiddenInputs={searchTermHiddenInput(loaderData.searchTerm)}
-      />
-    </>
-  );
-}
-
-export default function SearchRoute({ loaderData }: Route.ComponentProps) {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-
-  return (
-    <CollectionProvider
-      data={{ handle: `search:${loaderData.searchTerm}`, dataSearch: loaderData.dataSearch }}
-      urlSearch={searchParams.toString()}
-      onChange={(search) => {
-        const nextParams = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-        if (loaderData.searchTerm && !nextParams.has("q"))
-          nextParams.set("q", loaderData.searchTerm);
-        nextParams.delete("after");
-        const nextSearch = nextParams.toString();
-        void navigate(
-          { search: nextSearch ? `?${nextSearch}` : "" },
-          {
-            replace: searchParams.size > 0,
-            preventScrollReset: true,
-          },
-        );
-      }}
-    >
-      {loaderData.performed ? (
-        <SearchViewedTracker
-          searchTerm={loaderData.searchTerm}
-          totalCount={loaderData.totalCount}
-        />
-      ) : null}
-      <main className="flex-1" id="main-content" tabIndex={-1}>
-        <BreadcrumbJsonLd origin={loaderData.origin} />
-        <SearchHeader term={loaderData.searchTerm} />
-        {loaderData.performed ? (
-          <div className="pw-gutter pb-28">
-            <SearchResults loaderData={loaderData} />
-          </div>
+          ) : null}
+        </form>
+        {content?.menus.suggestions.length ? (
+          <nav aria-label={t("search.suggestions_label")} className="flex flex-wrap gap-2">
+            {content.menus.suggestions.map((item) => {
+              const active = new URLSearchParams(item.url.split("?")[1] ?? "").get("q")?.toLowerCase() === term.toLowerCase();
+              return (
+                <Link
+                  key={item.url + item.title}
+                  to={item.url}
+                  aria-current={active ? "true" : undefined}
+                  className={`inline-flex h-10 items-center border px-4 text-[13px] ${active ? "border-ink" : "border-line hover:border-ink"}`}
+                >
+                  {item.title}
+                </Link>
+              );
+            })}
+          </nav>
         ) : null}
-      </main>
-    </CollectionProvider>
+      </section>
+
+      {term ? (
+        <section className={`pb-28 motion-safe:transition-opacity ${updating ? "opacity-60" : ""}`} aria-busy={updating} aria-labelledby="results-heading">
+          <h2 id="results-heading" className="sr-only">
+            {t("search.results_heading")}
+          </h2>
+          {items.length ? (
+            <>
+              <div className="pw-gutter flex flex-wrap items-center justify-between gap-4 pb-6 text-[13px]">
+                <span className="text-muted" aria-live="polite">
+                  {t(totalCount === 1 ? "search.count_one" : "search.count_other", { count: totalCount, term })}
+                </span>
+                <Form method="get" preventScrollReset replace className="flex h-11 items-center gap-5" onChange={(e) => submit(e.currentTarget, { preventScrollReset: true, replace: true })}>
+                  <input type="hidden" name="q" value={term} />
+                  <label htmlFor="search-sort" className="text-muted">
+                    {t("collection.sort")}
+                  </label>
+                  <select id="search-sort" name="sort" defaultValue={sort} key={sort} className="border-ink !w-auto border-0 border-b !bg-transparent !px-0 !py-1 text-[13px]">
+                    {SEARCH_SORTS.map((value) => (
+                      <option key={value} value={value}>
+                        {t(SORT_KEYS[value])}
+                      </option>
+                    ))}
+                  </select>
+                  <noscript>
+                    <button type="submit" className="pw-link">
+                      {t("collection.apply")}
+                    </button>
+                  </noscript>
+                </Form>
+              </div>
+              <ProductGrid items={items} priorityCount={2} />
+              {nextCursor ? (
+                <div className="flex justify-center pt-12">
+                  <Link to={`/search?${new URLSearchParams({ q: term, sort, after: nextCursor })}`} className="pw-btn pw-btn--secondary">
+                    {t("search.next_page")}
+                  </Link>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div aria-live="polite" className="pw-gutter border-line flex flex-col items-center gap-3.5 border-y py-24 text-center">
+              <p className="pw-title">{t("search.empty", { term })}</p>
+              <p className="text-muted">{t("search.empty_hint")}</p>
+              <Link to="/collections/all" className="pw-link">
+                {t("search.empty_link")}
+              </Link>
+            </div>
+          )}
+        </section>
+      ) : null}
+    </main>
   );
 }

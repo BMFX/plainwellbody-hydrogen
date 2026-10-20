@@ -14,6 +14,42 @@ Set the runtime variables from `.env.example` in Coolify. Tokens, session secret
 
 Start with an HTTPS preview domain. Verify catalog, product, cart, checkout redirect, policies, contact, newsletter and Customer Accounts before attaching `plainwellbody.com`. Register preview and production callback/logout origins in Shopify Customer Account settings. Email sign-in needs the user to complete its one-time code. Domain cutover is a separate rollout step.
 
+## Content lives in Shopify
+
+Every word, image, link and menu comes from Shopify; the code holds layout only. If
+Shopify has nothing for something, the site shows nothing (or a 404), never a fallback.
+
+- **Pages and collections** carry a `plainwell.sections` metafield: a list of section
+  metaobjects (Content › Metaobjects › Section: …), each rendered by its component in
+  `app/components/Sections.tsx`.
+- **Interface text** (buttons, labels, messages) is the `pw_text` metaobject, one entry
+  per key. `useText()` reads it; `{name}` fills a value and `[label](/path)` makes a link.
+- **Site settings** (`pw_settings`, handle `site`): logos, site icon, sharing image,
+  shipping figures, the Shop all collection, the home page, the bag's "Often added"
+  products and the announcement bar.
+- **Menus** (Online Store › Navigation): `main-menu`, `footer` (one column per top-level
+  item), `footer-legal`, `shop-categories` (collection tabs), `mobile-secondary`,
+  `search-suggestions`.
+- **Products** use `plainwell.scent`, `family`, `coming_soon`, `details`, `ingredients`
+  and `ritual_image`; reviews come from the standard `reviews.rating` and
+  `reviews.rating_count` metafields that review apps fill.
+
+`scripts/shopify/setup.mjs` creates the model and seeds the approved design copy
+(`scripts/shopify/seed/`). It needs an Admin app (Dev Dashboard) with
+`SHOPIFY_ADMIN_CLIENT_ID` and `SHOPIFY_ADMIN_CLIENT_SECRET` in `.env` and these scopes:
+`write_products`, `write_publications`, `write_files`, `write_online_store_navigation`,
+`write_online_store_pages`, `write_metaobject_definitions`, `write_metaobjects`.
+
+```bash
+npm run shopify:setup                         # read-only check of what would change
+npm run shopify:setup -- --apply              # create whatever is missing
+npm run shopify:setup -- --apply --overwrite  # also reset existing entries to the seed
+```
+
+Entries that already exist are left alone unless you pass `--overwrite`, so edits made in
+Shopify survive a rerun. The Headless channel's Storefront API permissions must include
+metaobjects, pages and menus.
+
 ## Credentials
 
 Use `SHOPIFY_ADMIN_CLIENT_ID` and `SHOPIFY_ADMIN_CLIENT_SECRET` for automatic 24-hour Admin token renewal. The legacy `SHOPIFY_ADMIN_API_TOKEN` fallback is optional and should be omitted for this app. Never prefix private credentials with `PUBLIC_`. `.env` is ignored by Git and excluded from Docker.
