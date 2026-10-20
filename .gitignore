@@ -14,3 +14,7 @@ customer-account-graphql-env.d.ts
 .env*
 !.env.example
 .DS_Store
+
+# Claude
+.claude/
+CLAUDE.md
