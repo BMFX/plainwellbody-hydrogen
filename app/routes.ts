@@ -5,6 +5,7 @@ export default [
   route("products/:handle", "routes/product.tsx"),
   route("collections/:handle", "routes/collection.tsx"),
   route("cart", "routes/cart.tsx"),
+  route("a/cart/:token", "routes/sendthecart.tsx"),
   route("search", "routes/search.tsx"),
   route("pages/:handle", "routes/page.tsx"),
   route("policies/:handle", "routes/policy.tsx"),
