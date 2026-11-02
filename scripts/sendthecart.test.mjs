@@ -72,3 +72,11 @@ test('current Hydrogen publication, prices and subscription requirements overrid
   assert.equal(loaded.items[0].available,false);assert.equal(loaded.items[0].price,'20');assert.equal(loaded.items[1].available,false);
  }finally{globalThis.fetch=original;}
 });
+test('promotion application preserves existing codes and requires native applicability',async()=>{
+ const rejected=handlers();const failed=await applySelection(request(),{},{...payload(),promotion:{code:'NEW'}},rejected);
+ assert.equal(failed.ok,false);assert.deepEqual(rejected.calls.at(-1).discountCodes,['OLD','NEW']);
+ const accepted=handlers();const original=accepted.post;
+ // Read before the real parser consumes the request body.
+ accepted.post=async(args)=>{const body=await args.request.clone().json();const result=await original(args);if(body.discountCodes)result.data.cart.discountCodes=[{code:'OLD',applicable:true},{code:'NEW',applicable:true}];return result;};
+ assert.equal((await applySelection(request(),{},{...payload(),promotion:{code:'NEW'}},accepted)).ok,true);
+});

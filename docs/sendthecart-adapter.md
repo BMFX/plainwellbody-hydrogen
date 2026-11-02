@@ -25,3 +25,23 @@ The `/a/cart/:token` route resolves a selection through Shopify's signed Online 
 Run `npm run test:sendthecart`, `npm run test:runtime`, TypeScript/gql.tada checks and `npm run build`. Tests cover upstream secret isolation, store binding, forged choices, publication/subscription checks, keep/replace ordering, partial failure/cookie preservation, CSRF and redirect safety. Both new adapter files also passed the Shopify Hydrogen 2026-10 validator; it reports no Shopify UI components, so this is not a visual review.
 
 Rollback: disable the headless share-URL override and restore the previous storefront and pilot deployment pins. Leave existing Shopify proxy links and all audit/history records intact. The new interface text can remain unused in Shopify.
+
+## Live acceptance — November 2, 2026
+
+Production Hydrogen is pinned to `1d3fc66c6fd53558f3e3da609a200a12fb877e3d`; the isolated Plainwell SendTheCart pilot is pinned to `504198d8bb5a720f6d22c8f3160ba84d1d3958e9`. Both completed deployment and reported healthy containers. Pilot app, worker and scheduler images use the same revision. No other store deployment was changed.
+
+The existing deployment credentials created the 19 missing `stc.*` Shopify labels in place; no credential file was copied and no existing entry overwritten.
+
+Native shopper acceptance on `plainwellbody.com`:
+
+| Case | Result |
+| --- | --- |
+| Optional selection, both accessories deselected | 2 required units, $40 subtotal |
+| Keep existing bag, add Cedar Starter | Existing $40 retained; 4 units, $66 subtotal |
+| Replace bag, all Cedar Routine items | Previous items removed after add; 4 units, $62 subtotal |
+| Cedar Essentials Refill, two sets, replace | 2 washes + 2 hand washes + 4 soaps; 8 units, $96 subtotal |
+| Cleanup | Original empty bag restored with native remove controls |
+
+No checkout or order was submitted. Promotion applicability has automated coverage; live native discount/Function qualification, subscriptions and paid-order attribution remain separate work. Nine focused adapter tests and three runtime tests pass. TypeScript, gql.tada and build pass; the unrelated section-query external check was skipped because the toolkit was absent from this isolated checkout.
+
+After these passes, the operator enabled the exact Plainwell pilot connection's headless share URL at `https://plainwellbody.com`, while retaining `https://checkout.plainwellbody.com` as its native signed-proxy origin. Activation stores verification time/revision and emits `shopify.headless_storefront.activated` in application logs.
