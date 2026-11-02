@@ -2,6 +2,26 @@
 // A one-time import of the site's current wording; after seeding, edit it in Shopify
 // (Content › Metaobjects › Interface text). {name} marks a value filled in by the site.
 export const TEXT = {
+  "stc.title": "Your shared selection",
+  "stc.intro": "Review this selection before adding it to your Plainwell bag. Choose your optional essentials below.",
+  "stc.include": "Include {name}",
+  "stc.required": "Required",
+  "stc.optional": "Optional",
+  "stc.quantity": "Quantity per set: {count}",
+  "stc.available": "Available",
+  "stc.unavailable": "Unavailable",
+  "stc.sets": "Number of sets",
+  "stc.behavior": "Items already in your bag",
+  "stc.keep": "Keep existing items and add this selection",
+  "stc.replace": "Replace existing items with this selection",
+  "stc.disclosure": "Replacing removes existing items from your bag. Prices, availability and any discounts are confirmed in your bag. Opening this selection does not place an order.",
+  "stc.blocked": "A required product is unavailable. Ask Plainwell to update this selection.",
+  "stc.promotion": "Promotion {code} will be requested. Eligibility and any savings are confirmed in your bag.",
+  "stc.add": "Add selection to bag",
+  "stc.adding": "Preparing your bag…",
+  "stc.error": "We could not finish preparing this selection. Your bag may have changed. Review it before opening this link again; we have not retried the add.",
+  "stc.review_bag": "Review your bag",
+
   // Accessibility
   "a11y.skip_to_content": "Skip to content",
   "a11y.announcement": "Announcement",
