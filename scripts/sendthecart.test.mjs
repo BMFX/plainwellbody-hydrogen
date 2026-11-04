@@ -10,8 +10,10 @@ const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.Co
 const timingExports={};
 const timingSource=readFileSync(new URL('../app/lib/request-timing.ts',import.meta.url),'utf8');
 new Function('require','exports',ts.transpileModule(timingSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(require,timingExports);
+const cacheExports={};
+new Function('require','exports',ts.transpileModule(readFileSync(new URL('../app/lib/recipe-cache.server.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(require,cacheExports);
 const exports={};
-new Function('require','exports',output)(name=>name==='@shopify/hydrogen'?{Cache:{none:()=>({})},gql:query=>query,createCartCookie}:name==='./cart-handlers'?{cartHandlers:{}}:name==='./request-timing'?timingExports:require(name),exports);
+new Function('require','exports',output)(name=>name==='@shopify/hydrogen'?{Cache:{none:()=>({})},gql:query=>query,createCartCookie}:name==='./cart-handlers'?{cartHandlers:{}}:name==='./request-timing'?timingExports:name==='./recipe-cache.server'?cacheExports:require(name),exports);
 const {proxyUrl,proxyRequest,parseSelection,readChoice,parsePayload,applySelection,loadSelection,destination,requireSameOrigin}=exports;
 const env={PUBLIC_STORE_DOMAIN:'example.myshopify.com',PUBLIC_CHECKOUT_DOMAIN:'checkout.example.test'};
 const request=()=>new Request('https://example.test/a/cart/cedar?utm_source=email&admin_token=private&cartId=injected',{headers:{cookie:'cart=old; login=private',authorization:'secret'}});
@@ -80,7 +82,7 @@ test('cross-site cart submissions and unsafe custom redirects are rejected',()=>
  assert.equal(destination({redirect_mode:'custom',redirect_to:'/pages/thanks'}),'/pages/thanks');assert.equal(destination({redirect_mode:'checkout'}),'/checkout');assert.equal(destination({}),'/cart');
 });
 test('current Hydrogen publication, prices and subscription requirements override catalog availability',async()=>{
- const original=globalThis.fetch;globalThis.fetch=async()=>new Response(JSON.stringify({version:1,shop:env.PUBLIC_STORE_DOMAIN,review:selection()}),{headers:{'content-type':'application/json'}});
+ const original=globalThis.fetch;globalThis.fetch=async()=>new Response(JSON.stringify({version:1,shop:env.PUBLIC_STORE_DOMAIN,recipe:{valid_until:Math.floor(Date.now()/1000)+3600,recipe_token:'signed-proof',review:Object.fromEntries(Object.entries(selection()).filter(([key])=>key!=='ticket'))}}),{headers:{'content-type':'application/json'}});
  try{
   const loaded=await loadSelection(env,'cedar',request(),{graphql:async()=>({data:{nodes:[{id:'gid://shopify/ProductVariant/200',availableForSale:true,price:{amount:'20',currencyCode:'USD'},product:{requiresSellingPlan:true}}]}})});
   assert.equal(loaded.items[0].available,false);assert.equal(loaded.items[0].price,'20');assert.equal(loaded.items[1].available,false);
@@ -105,4 +107,37 @@ test('a fresh cart combines products, attribution and promotion in one native mu
 test('partial cart creation preserves its cookie for recovery and never retries',async()=>{
  const h=handlers({empty:true,createFails:true});const result=await applySelection(request(),h.client,payload(),h);
  assert.equal(result.ok,false);assert.equal(h.finish.length,1);assert.match(result.headers.get('set-cookie'),/cart=/);
+});
+
+test('published recipe cache coalesces cold requests, isolates shops, and returns fresh attempts without an upstream GET',async()=>{
+ const original=globalThis.fetch;let calls=0;
+ const definition=selection();delete definition.ticket;
+ globalThis.fetch=async()=>{calls++;return Response.json({version:1,shop:env.PUBLIC_STORE_DOMAIN,recipe:{valid_until:Math.floor(Date.now()/1000)+3600,recipe_token:'proof',review:definition}});};
+ try {
+  const [a,b]=await Promise.all([exports.cachedSelection(env,'cache-warm'),exports.cachedSelection(env,'cache-warm')]);
+  assert.equal(calls,1);assert.notEqual(a.ticket,b.ticket);assert.equal(a.ticket.length,64);assert.equal(a.recipe_token,'proof');
+  a.items[0].quantity=999;
+  assert.equal((await exports.cachedSelection(env,'cache-warm')).items[0].quantity,2);assert.equal(calls,1);
+  const form=new FormData();form.set('sets','1');form.set('behavior','retain_cart');form.set('review_ticket',b.ticket);form.set('recipe_token',b.recipe_token);
+  assert.equal(readChoice(form,b).recipe_token,'proof');
+  globalThis.fetch=async()=>new Response(null,{status:409});
+  await assert.rejects(exports.refreshRecipe(env,'cache-warm','bad-notice'));
+  assert.equal((await exports.cachedSelection(env,'cache-warm')).recipe_token,'proof');
+  globalThis.fetch=async()=>new Response(null,{status:404});
+  await exports.refreshRecipe(env,'cache-warm','valid-disable-notice');
+  await assert.rejects(exports.cachedSelection(env,'cache-warm'));
+ }finally{globalThis.fetch=original;}
+});
+test('recipe cache expiry, refresh races and failures never retain an unverified replacement',async()=>{
+ const cache=new cacheExports.PublishedRecipeCache();let now=Date.now();const original=Date.now;Date.now=()=>now;
+ const value=()=>({valid_until:Math.floor(now/1000)+3600,revision:'v1'});let calls=0;
+ try{
+  await cache.get('a',async()=>{calls++;return value();});now+=301000;
+  await cache.get('a',async()=>{calls++;return value();});assert.equal(calls,2);
+  let resolve;const pending=cache.get('race',()=>new Promise(done=>{resolve=done;}));
+  await cache.refresh('race',async()=>({...value(),revision:'v2'}));resolve(value());await pending;
+  assert.equal((await cache.get('race',async()=>value())).revision,'v2');
+  await assert.rejects(cache.refresh('race',async()=>{throw new Error('bad proof');}));
+  assert.equal((await cache.get('race',async()=>value())).revision,'v2');
+ }finally{Date.now=original;}
 });

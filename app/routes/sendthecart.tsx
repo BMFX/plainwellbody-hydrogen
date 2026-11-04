@@ -59,6 +59,7 @@ export default function SendTheCartRoute({loaderData,actionData}: Route.Componen
     </div> : null}
     <Form method="post" reloadDocument className="mt-10 max-w-[740px]" aria-busy={pending}>
       <input type="hidden" name="review_ticket" value={selection.ticket}/>
+      {selection.recipe_token && <input type="hidden" name="recipe_token" value={selection.recipe_token}/>}
       <ul className="divide-line divide-y border-y border-line">
         {selection.items.map(item => <li key={item.key} className="flex items-start gap-4 py-6">
           {item.optional ? <input type="checkbox" name="optional_keys" value={item.key} defaultChecked={item.available} disabled={!item.available}

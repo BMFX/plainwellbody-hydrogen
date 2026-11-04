@@ -1,13 +1,15 @@
 import { Cache, createCartCookie, gql } from "@shopify/hydrogen";
 
+import { PublishedRecipeCache, recipeAttempt } from "./recipe-cache.server";
+
 import { cartHandlers } from "./cart-handlers";
 import { RequestTiming } from "./request-timing";
 import type { Env } from "./env";
 import type { RequestStorefrontClient } from "./storefront";
 
 export type SelectionItem = { key: string; title: string; quantity: number; optional: boolean; available: boolean; platform_variant_id: string; price: string | null; currency: string };
-export type Selection = { ticket: string; name: string; reorder: boolean; behavior: "retain_cart" | "clear_cart"; items: SelectionItem[]; promotion?: {code:string} | null; redirect_mode?: string; redirect_to?: string };
-export type Choice = { review_ticket: string; optional_keys: string[]; sets: number; behavior: "retain_cart" | "clear_cart" };
+export type Selection = { ticket: string; recipe_token?: string; name: string; reorder: boolean; behavior: "retain_cart" | "clear_cart"; items: SelectionItem[]; promotion?: {code:string} | null; redirect_mode?: string; redirect_to?: string };
+export type Choice = { review_ticket: string; recipe_token?: string; optional_keys: string[]; sets: number; behavior: "retain_cart" | "clear_cart" };
 type Payload = { behavior: Choice["behavior"]; items: {platform_variant_id: string; quantity: number}[]; attribution?: {shopify?: {line_item_properties?: Record<string,string>; cart_attributes?: Record<string,string>}}; promotion?: {code: string} | null; redirect_mode?: string; redirect_to?: string };
 const tokenPattern = /^(?:[a-z0-9]+(?:-[a-z0-9]+)*|[A-Za-z0-9]{40,128})$/;
 const numericId = /^\d{1,20}$/;
@@ -68,14 +70,14 @@ const VARIANTS = gql(`
   }
 `);
 export async function loadSelection(env: Env, token: string, request: Request, client: RequestStorefrontClient, timing = new RequestTiming()): Promise<Selection> {
-  const selection = parseSelection(await timing.measure("selection_lookup", () => proxyRequest(env, token, request)), env.PUBLIC_STORE_DOMAIN);
+  const selection = await timing.measure("selection_lookup", () => cachedSelection(env, token));
   const result = await timing.measure("availability", () => client.graphql(VARIANTS, {variables: {ids: selection.items.map(item => `gid://shopify/ProductVariant/${item.platform_variant_id}`)}, cache: Cache.none()}));
   if (result.errors?.length || !result.data) throw new Error("availability");
   const variants = new Map<string,NativeVariant>();
   for (const node of result.data.nodes as (NativeVariant | null)[]) if (node?.id) variants.set(node.id,node);
   return {...selection, items: selection.items.map(item => {
     const native = variants.get(`gid://shopify/ProductVariant/${item.platform_variant_id}`);
-    return {...item, available: Boolean(item.available && native?.availableForSale && !native.product.requiresSellingPlan),
+    return {...item, available: Boolean(native?.availableForSale && !native.product.requiresSellingPlan),
       price: native?.price.amount ?? null, currency: native?.price.currencyCode ?? ""};
   })};
 }
@@ -89,7 +91,9 @@ export function readChoice(form: FormData, selection: Selection): Choice {
     || optional_keys.some(key => !selection.items.some(item => item.key === key && item.optional))) throw new Error("choice");
   const chosen = selection.items.filter(item => !item.optional || optional_keys.includes(item.key));
   if (chosen.some(item => !item.available || item.quantity * sets > 999)) throw new Error("availability");
-  return {review_ticket: String(form.get("review_ticket") || ""), optional_keys, sets, behavior: behavior as Choice["behavior"]};
+  const recipe_token = form.get("recipe_token");
+  if (recipe_token !== null && (typeof recipe_token !== "string" || !recipe_token || recipe_token.length > 8192)) throw new Error("recipe");
+  return {review_ticket: String(form.get("review_ticket") || ""), ...(typeof recipe_token === "string" ? {recipe_token} : {}), optional_keys, sets, behavior: behavior as Choice["behavior"]};
 }
 
 export function parsePayload(value: unknown, selection: Selection, choice: Choice): Payload {
@@ -231,4 +235,36 @@ export async function applySelection(request: Request, client: RequestStorefront
   } catch {
     return {ok:false as const,headers};
   }
+}
+
+
+type Recipe = {valid_until:number; recipe_token:string; review:Selection};
+const recipes = new PublishedRecipeCache<Recipe>();
+function recipeKey(env:Env, token:string) {return `${env.PUBLIC_CHECKOUT_DOMAIN}:${env.PUBLIC_STORE_DOMAIN}:${token}`;}
+async function fetchRecipe(env:Env, token:string, notice?:string):Promise<Recipe | null> {
+  const url = proxyUrl(env,token,new URL("https://store.invalid"));
+  url.searchParams.set("stc_recipe","1");
+  if (notice) url.searchParams.set("notice",notice);
+  const response = await fetch(url,{headers:{Accept:"application/json"},redirect:"error",cache:"no-store",signal:AbortSignal.timeout(10_000)});
+  if (notice && response.status === 404) return null;
+  if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("recipe");
+  const text = await response.text();
+  if (text.length > 250_000) throw new Error("recipe");
+  const data = JSON.parse(text);
+  const recipe = data.recipe;
+  if (!recipe || !Number.isInteger(recipe.valid_until) || typeof recipe.recipe_token !== "string" || !recipe.recipe_token || recipe.recipe_token.length > 8192
+    || !recipe.review || "ticket" in recipe.review || "recipe_token" in recipe.review) throw new Error("recipe");
+  const review = parseSelection({...data,review:{...recipe.review,ticket:"0".repeat(64)}},env.PUBLIC_STORE_DOMAIN);
+  return {valid_until:recipe.valid_until,recipe_token:recipe.recipe_token,review};
+}
+export async function cachedSelection(env:Env, token:string):Promise<Selection> {
+  const recipe = await recipes.get(recipeKey(env,token), async () => {
+    const value = await fetchRecipe(env,token);
+    if (!value) throw new Error("recipe");
+    return value;
+  });
+  return {...recipe.review,ticket:recipeAttempt(),recipe_token:recipe.recipe_token};
+}
+export async function refreshRecipe(env:Env, token:string, notice:string) {
+  await recipes.refresh(recipeKey(env,token),() => fetchRecipe(env,token,notice));
 }
