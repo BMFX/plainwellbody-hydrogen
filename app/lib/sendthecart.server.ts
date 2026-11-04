@@ -132,6 +132,55 @@ const CREATE_SELECTION_CART = gql(`
     }
   }
 `);
+const UPDATE_SELECTION_CART = gql(`
+  mutation SendTheCartUpdate(
+    $cartId: ID!, $lines: [CartLineUpdateInput!]!, $attributes: [AttributeInput!]!,
+    $discountCodes: [String!]!, $attribute: Boolean!, $promote: Boolean!,
+    $country: CountryCode, $language: LanguageCode
+  ) @inContext(country: $country, language: $language) {
+    updated: cartLinesUpdate(cartId: $cartId, lines: $lines) {
+      cart {
+        id totalQuantity
+        lines(first: 250) { nodes { id quantity attributes { key value } merchandise { ... on ProductVariant { id } } } }
+      }
+      userErrors { code field message }
+      warnings { code message target }
+    }
+    attributed: cartAttributesUpdate(cartId: $cartId, attributes: $attributes) @include(if: $attribute) {
+      cart { id }
+      userErrors { code field message }
+      warnings { code message target }
+    }
+    promoted: cartDiscountCodesUpdate(cartId: $cartId, discountCodes: $discountCodes) @include(if: $promote) {
+      cart { id discountCodes { code applicable } }
+      userErrors { code field message }
+      warnings { code message target }
+    }
+  }
+`);
+
+type ExistingLine = {
+  id: string; quantity: number; merchandise: {id?: string};
+  attributes: readonly {key: string; value: string | null}[];
+  sellingPlanAllocation?: unknown; parentRelationship?: unknown;
+};
+// Only exact, unique, one-time ordinary lines with selection-owned properties qualify.
+// Parent/child bundles, subscriptions, duplicate variants and custom properties keep the guarded add path.
+function matchingUpdates(existing: readonly ExistingLine[], desired: {merchandiseId:string; quantity:number; attributes:{key:string;value:string}[]}[]) {
+  if (existing.length !== desired.length || new Set(desired.map(line => line.merchandiseId)).size !== desired.length) return null;
+  const byVariant = new Map(existing.map(line => [line.merchandise?.id,line]));
+  if (byVariant.size !== existing.length) return null;
+  const updates = [];
+  for (const next of desired) {
+    const old = byVariant.get(next.merchandiseId);
+    if (!old || !Object.hasOwn(old,"parentRelationship") || old.parentRelationship !== null
+      || old.sellingPlanAllocation !== null || !Array.isArray(old.attributes)
+      || old.attributes.some(attr => !next.attributes.some(value => value.key === attr.key))) return null;
+    updates.push({id:old.id,quantity:next.quantity,attributes:next.attributes});
+  }
+  return updates;
+}
+
 const FINISH_SELECTION_CART = gql(`
   mutation SendTheCartFinish(
     $cartId: ID!, $lineIds: [ID!]!, $attributes: [AttributeInput!]!, $discountCodes: [String!]!,
@@ -206,6 +255,29 @@ export async function applySelection(request: Request, client: RequestStorefront
       }
       if (expected.size !== actual.size || [...expected].some(([id,quantity]) => actual.get(id) !== quantity)) throw new Error("cart");
       checkPromotion(payload.promotion?.code,[],created.discountCodes);
+      return {ok:true as const,headers};
+    }
+
+    const updates = payload.behavior === "clear_cart" ? matchingUpdates(cart.lines.nodes,lines) : null;
+    if (updates) {
+      const result = await timing.measure("cart_update", () => client.graphql(UPDATE_SELECTION_CART,{variables:{
+        cartId:cart.id,lines:updates,attributes:cartAttributes,discountCodes,
+        attribute:Boolean(cartAttributes.length),promote:Boolean(payload.promotion),
+      }}));
+      if (result.errors?.length || !result.data) throw new Error("cart");
+      checkedMutation(result.data.updated);
+      const updated = result.data.updated?.cart;
+      if (!updated || updated.id !== cart.id || updated.totalQuantity !== lines.reduce((sum,line) => sum+line.quantity,0)
+        || updated.lines.nodes.length !== lines.length || lines.some(expected => {
+          const actual = updated.lines.nodes.find(line => line.merchandise.id === expected.merchandiseId);
+          return !actual || actual.quantity !== expected.quantity || actual.attributes.length !== expected.attributes.length
+            || expected.attributes.some(attr => !actual.attributes.some(value => value.key === attr.key && value.value === attr.value));
+        })) throw new Error("cart");
+      if (cartAttributes.length) checkedMutation(result.data.attributed);
+      if (payload.promotion) {
+        checkedMutation(result.data.promoted);
+        checkPromotion(payload.promotion.code,codes,result.data.promoted?.cart?.discountCodes ?? []);
+      }
       return {ok:true as const,headers};
     }
 

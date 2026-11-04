@@ -146,3 +146,45 @@ test('control-plane timing passthrough rejects sensitive or malformed diagnostic
  assert.deepEqual(timingExports.backendTimings({app:100,catalog:50,db:0,token:'private',lookup:Infinity,payload:-1}),{backend_app:100,backend_catalog:50,backend_db:0});
  assert.deepEqual(timingExports.backendTimings(null),{});
 });
+
+function matchingHandlers({reject=false,partial=false}={}) {
+ const current=cart();current.lines.nodes=[{id:'same-line',quantity:1,merchandise:{id:'gid://shopify/ProductVariant/200'},attributes:[{key:'_stc_execution',value:'old'}],sellingPlanAllocation:null,parentRelationship:null}];
+ const calls=[];
+ const h={get:async()=>({data:{cart:current}}),post:async()=>{throw new Error('Unexpected add');}};
+ const client={graphql:async(document,{variables})=>{
+  calls.push({document,variables});
+  const updated={...current,totalQuantity:partial?1:2,lines:{nodes:[{...current.lines.nodes[0],quantity:partial?1:2,attributes:variables.lines[0].attributes}]}};
+  return {data:{updated:{cart:updated,userErrors:reject?[{code:'NOT_ENOUGH_STOCK'}]:[],warnings:[]},attributed:{cart:current,userErrors:[],warnings:[]},promoted:{cart:{...current,discountCodes:[{code:'OLD',applicable:true},{code:'NEW',applicable:true}]},userErrors:[],warnings:[]}}};
+ }};
+ return {h,client,current,calls};
+}
+test('matching replacement updates quantities and attribution once, without add/remove or changing cart identity',async()=>{
+ const {h,client,calls}=matchingHandlers();
+ const result=await applySelection(request(),client,{...payload(),behavior:'clear_cart',promotion:{code:'NEW'}},h);
+ assert.equal(result.ok,true);assert.equal(calls.length,1);assert.match(calls[0].document,/cartLinesUpdate/);
+ assert.deepEqual(calls[0].variables.lines,[{id:'same-line',quantity:2,attributes:[{key:'_stc_execution',value:'e1'}]}]);
+ assert.deepEqual(calls[0].variables.attributes,[{key:'gift',value:'yes'},{key:'stc_execution',value:'e1'}]);
+ assert.deepEqual(calls[0].variables.discountCodes,['OLD','NEW']);assert.equal(calls[0].variables.cartId,cart().id);
+ assert.equal(result.headers.has('set-cookie'),false);
+});
+test('matching update rejection and partial quantity results fail without retrying or falling back to another mutation',async()=>{
+ for(const options of [{reject:true},{partial:true}]){
+  const {h,client,calls}=matchingHandlers(options);
+  assert.equal((await applySelection(request(),client,{...payload(),behavior:'clear_cart'},h)).ok,false);assert.equal(calls.length,1);
+ }
+});
+test('subscriptions, bundle children, unknown line types, duplicate variants and custom properties retain guarded replacement',async()=>{
+ for(const change of [
+  line=>{line.sellingPlanAllocation={sellingPlan:{id:'plan'}};},
+  line=>{line.parentRelationship={parent:{id:'parent'}};},
+  line=>{delete line.parentRelationship;},
+  line=>{line.attributes.push({key:'engraving',value:'hello'});},
+ ]){
+  const {h,client,current,calls}=matchingHandlers();change(current.lines.nodes[0]);let adds=0;
+  h.post=async()=>{adds++;return {type:'error',headers:{}};};
+  assert.equal((await applySelection(request(),client,{...payload(),behavior:'clear_cart'},h)).ok,false);assert.equal(adds,1);assert.equal(calls.length,0);
+ }
+ const {h,client,current,calls}=matchingHandlers();current.lines.nodes.push({...current.lines.nodes[0],id:'duplicate'});current.totalQuantity=2;let adds=0;
+ h.post=async()=>{adds++;return {type:'error',headers:{}};};
+ assert.equal((await applySelection(request(),client,{...payload(),items:[...payload().items,...payload().items],behavior:'clear_cart'},h)).ok,false);assert.equal(adds,1);assert.equal(calls.length,0);
+});
