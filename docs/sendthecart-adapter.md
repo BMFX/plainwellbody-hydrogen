@@ -70,3 +70,16 @@ SendTheCart's full-document form redirect now uses `/cart` directly. The root
 loader already reads the newly committed cart cookie on that document request;
 the routine finder's `?added` client refresh flag would fetch the same cart again
 after hydration. Interactive routine-finder refresh behavior is left in place.
+
+### Request profiling (November 4)
+
+Cart-link and `/cart` document responses include numeric `Server-Timing` stages:
+`selection_lookup`, `availability`, `confirmation`, `cart_read`, `cart_create`
+or `cart_add`/`cart_finish`, plus concurrent root cart/layout/content and total
+request preparation. Durations only; no identifiers, payloads or credentials.
+These headers do not change caching, availability validation, cart writes or
+retry behavior. Root stages overlap each other and the child loader; don't sum
+all metrics as if they were serial. HTTP response completion includes streaming
+and network time beyond the request-preparation metric.
+
+Reference: [Hydrogen performance guidance](https://shopify.dev/docs/storefronts/themes/best-practices/performance/hydrogen-performance).

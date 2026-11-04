@@ -1,5 +1,6 @@
 import { Form, Link, data, redirect, useNavigation } from "react-router";
 
+import {requestTimingContext} from "~/lib/request-timing";
 import { useText } from "~/lib/text";
 import { envContext } from "~/lib/env";
 import { loadSiteContent } from "~/lib/content";
@@ -19,7 +20,7 @@ export async function loader({context,params,request}: Route.LoaderArgs) {
     const client = context.get(storefrontClientContext);
     const site = await loadSiteContent(client);
     if (!site.text["stc.title"]) throw new Error("content");
-    const selection = await loadSelection(context.get(envContext),params.token,request,client);
+    const selection = await loadSelection(context.get(envContext),params.token,request,client,context.get(requestTimingContext));
     return data({selection},{headers:privateHeaders});
   } catch {
     throw new Response(null,{status:404,headers:privateHeaders});
@@ -33,10 +34,10 @@ export async function action({context,params,request}: Route.ActionArgs) {
   try {
     const form = await request.formData();
     // Recheck current link state and Hydrogen-channel publication before any cart write.
-    const selection = await loadSelection(env,params.token,request,client);
+    const selection = await loadSelection(env,params.token,request,client,context.get(requestTimingContext));
     const choice = readChoice(form,selection);
-    const payload = parsePayload(await proxyRequest(env,params.token,request,choice),selection,choice);
-    const result = await applySelection(request,client,payload);
+    const payload = parsePayload(await context.get(requestTimingContext).measure("confirmation", () => proxyRequest(env,params.token,request,choice)),selection,choice);
+    const result = await applySelection(request,client,payload,undefined,context.get(requestTimingContext));
     if (!result.ok) return data({failed:true},{status:502,headers:result.headers});
     // Keep the shopper in this storefront. /checkout is Hydrogen's existing checkout route.
     return redirect(destination(payload),{status:303,headers:result.headers});

@@ -28,6 +28,7 @@ import { envContext } from "~/lib/env";
 import { shopifyImageUrl } from "~/lib/images";
 import { predictiveSearchHandlers } from "~/lib/predictive-search-handlers";
 import { loadRootLayout } from "~/lib/root-layout";
+import {RequestTiming, requestTimingContext} from "~/lib/request-timing";
 import { routeTemplates } from "~/lib/route-templates";
 import { createEphemeralSessionManager } from "~/lib/session";
 import { analyticsConsent, resolveShopIdentity, storefrontConfig } from "~/lib/shop";
@@ -50,6 +51,9 @@ export const links: Route.LinksFunction = () => [
 
 export const middleware: Route.MiddlewareFunction[] = [
   async ({ context, request }, next) => {
+    const timing = new RequestTiming();
+    context.set(requestTimingContext, timing);
+    const requestStarted = performance.now();
     const env = context.get(envContext);
     const storefrontClient = createRequestStorefrontClient(
       request,
@@ -93,6 +97,10 @@ export const middleware: Route.MiddlewareFunction[] = [
     }
 
     requestContext.applyResponseHeaders(response.headers);
+    if (/^\/(?:a\/cart\/[^/]+|cart)\/?$/.test(new URL(request.url).pathname)) {
+      timing.durations.request = performance.now() - requestStarted;
+      response.headers.append("Server-Timing", timing.header());
+    }
     return response;
   },
 ];
@@ -100,10 +108,11 @@ export const middleware: Route.MiddlewareFunction[] = [
 export async function loader({ context, request }: Route.LoaderArgs) {
   const env = context.get(envContext);
   const storefrontClient = context.get(storefrontClientContext);
+  const timing = context.get(requestTimingContext);
   const [cartResult, layout, content] = await Promise.all([
-    cartHandlers.get({ storefrontClient, request }),
-    loadRootLayout(storefrontClient),
-    loadSiteContent(storefrontClient, [env.PUBLIC_STORE_DOMAIN, new URL(request.url).hostname]),
+    timing.measure("root_cart", () => cartHandlers.get({ storefrontClient, request })),
+    timing.measure("root_layout", () => loadRootLayout(storefrontClient)),
+    timing.measure("root_content", () => loadSiteContent(storefrontClient, [env.PUBLIC_STORE_DOMAIN, new URL(request.url).hostname])),
   ]);
 
   return {

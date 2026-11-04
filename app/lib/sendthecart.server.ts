@@ -1,6 +1,7 @@
 import { Cache, createCartCookie, gql } from "@shopify/hydrogen";
 
 import { cartHandlers } from "./cart-handlers";
+import { RequestTiming } from "./request-timing";
 import type { Env } from "./env";
 import type { RequestStorefrontClient } from "./storefront";
 
@@ -66,9 +67,9 @@ const VARIANTS = gql(`
     }
   }
 `);
-export async function loadSelection(env: Env, token: string, request: Request, client: RequestStorefrontClient): Promise<Selection> {
-  const selection = parseSelection(await proxyRequest(env, token, request), env.PUBLIC_STORE_DOMAIN);
-  const result = await client.graphql(VARIANTS, {variables: {ids: selection.items.map(item => `gid://shopify/ProductVariant/${item.platform_variant_id}`)}, cache: Cache.none()});
+export async function loadSelection(env: Env, token: string, request: Request, client: RequestStorefrontClient, timing = new RequestTiming()): Promise<Selection> {
+  const selection = parseSelection(await timing.measure("selection_lookup", () => proxyRequest(env, token, request)), env.PUBLIC_STORE_DOMAIN);
+  const result = await timing.measure("availability", () => client.graphql(VARIANTS, {variables: {ids: selection.items.map(item => `gid://shopify/ProductVariant/${item.platform_variant_id}`)}, cache: Cache.none()}));
   if (result.errors?.length || !result.data) throw new Error("availability");
   const variants = new Map<string,NativeVariant>();
   for (const node of result.data.nodes as (NativeVariant | null)[]) if (node?.id) variants.set(node.id,node);
@@ -161,12 +162,12 @@ function checkPromotion(code: string | undefined, previous: {code:string;applica
 }
 
 // No mutation is retried. Existing carts keep their identity, note and buyer details.
-export async function applySelection(request: Request, client: RequestStorefrontClient, payload: Payload, handlers = cartHandlers) {
+export async function applySelection(request: Request, client: RequestStorefrontClient, payload: Payload, handlers = cartHandlers, timing = new RequestTiming()) {
   const headers = new Headers({"Cache-Control":"no-store", "Referrer-Policy":"no-referrer"});
   try {
     // Never accept a cart id from shared-link query parameters.
     const cartRequest = new Request(new URL("/api/cart",request.url), {headers:{Cookie:request.headers.get("cookie") || ""}});
-    const initial = await handlers.get({request:cartRequest, storefrontClient:client});
+    const initial = await timing.measure("cart_read", () => handlers.get({request:cartRequest, storefrontClient:client}));
     if (initial.data.errors?.length) throw new Error("cart");
     const cart = initial.data.cart;
     const attribution = payload.attribution?.shopify ?? {};
@@ -182,10 +183,10 @@ export async function applySelection(request: Request, client: RequestStorefront
 
     if (!cart) {
       // A new shopper's items, attribution and promotion need only one native write.
-      const result = await client.graphql(CREATE_SELECTION_CART, {variables:{input:{lines,
+      const result = await timing.measure("cart_create", () => client.graphql(CREATE_SELECTION_CART, {variables:{input:{lines,
         ...(cartAttributes.length ? {attributes:cartAttributes} : {}),
         ...(payload.promotion ? {discountCodes} : {}),
-      }}});
+      }}}));
       const created = result.data?.cartCreate?.cart;
       // A partial result may still create a bag. Keep it visible for manual recovery.
       if (created?.id) headers.append("Set-Cookie",createCartCookie(created.id));
@@ -205,19 +206,19 @@ export async function applySelection(request: Request, client: RequestStorefront
     }
 
     // Add first and check success before removing any previous products.
-    const added = await handlers.post({storefrontClient:client,request:new Request(new URL("/api/cart",request.url),{
+    const added = await timing.measure("cart_add", () => handlers.post({storefrontClient:client,request:new Request(new URL("/api/cart",request.url),{
       method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json",Cookie:request.headers.get("cookie") || ""},
       body:JSON.stringify({cartId:cart.id,lines}),
-    })});
+    })}));
     new Headers(added.headers).forEach((value,key) => {if (key.toLowerCase() === "set-cookie") headers.append(key,value);});
     if (added.type !== "json") throw new Error("cart");
     checkedMutation(added.data as MutationResult);
 
     if (oldLines.length || cartAttributes.length || payload.promotion) {
       // Independent completion fields share one network round trip, after a successful add.
-      const result = await client.graphql(FINISH_SELECTION_CART,{variables:{cartId:cart.id,lineIds:oldLines,
+      const result = await timing.measure("cart_finish", () => client.graphql(FINISH_SELECTION_CART,{variables:{cartId:cart.id,lineIds:oldLines,
         attributes:cartAttributes,discountCodes,remove:Boolean(oldLines.length),attribute:Boolean(cartAttributes.length),promote:Boolean(payload.promotion),
-      }});
+      }}));
       if (result.errors?.length || !result.data) throw new Error("cart");
       if (oldLines.length) checkedMutation(result.data.removed);
       if (cartAttributes.length) checkedMutation(result.data.attributed);
