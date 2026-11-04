@@ -13,3 +13,10 @@ export class RequestTiming {
   }
 }
 export const requestTimingContext = createContext<RequestTiming>();
+
+// Only fixed numeric stages are allowed out of the control plane.
+const backendStages = new Set(["app", "db", "provider_http", "billing", "tenancy", "lookup", "authorize", "proof", "selection", "catalog", "validate", "consume", "payload", "execution", "analytics"]);
+export function backendTimings(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([key,ms]) => backendStages.has(key) && typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && ms <= 120_000).map(([key,ms]) => [`backend_${key}`, Number(ms)]));
+}

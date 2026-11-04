@@ -141,3 +141,8 @@ test('recipe cache expiry, refresh races and failures never retain an unverified
   assert.equal((await cache.get('race',async()=>value())).revision,'v2');
  }finally{Date.now=original;}
 });
+
+test('control-plane timing passthrough rejects sensitive or malformed diagnostic fields',()=>{
+ assert.deepEqual(timingExports.backendTimings({app:100,catalog:50,db:0,token:'private',lookup:Infinity,payload:-1}),{backend_app:100,backend_catalog:50,backend_db:0});
+ assert.deepEqual(timingExports.backendTimings(null),{});
+});

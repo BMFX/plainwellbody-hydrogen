@@ -1,6 +1,6 @@
 import { Form, Link, data, redirect, useNavigation } from "react-router";
 
-import {requestTimingContext} from "~/lib/request-timing";
+import {backendTimings, requestTimingContext} from "~/lib/request-timing";
 import { useText } from "~/lib/text";
 import { envContext } from "~/lib/env";
 import { loadSiteContent } from "~/lib/content";
@@ -36,7 +36,9 @@ export async function action({context,params,request}: Route.ActionArgs) {
     // Recheck current link state and Hydrogen-channel publication before any cart write.
     const selection = await loadSelection(env,params.token,request,client,context.get(requestTimingContext));
     const choice = readChoice(form,selection);
-    const payload = parsePayload(await context.get(requestTimingContext).measure("confirmation", () => proxyRequest(env,params.token,request,choice)),selection,choice);
+    const confirmed = await context.get(requestTimingContext).measure("confirmation", () => proxyRequest(env,params.token,request,choice));
+    Object.assign(context.get(requestTimingContext).durations, backendTimings((confirmed as {stc_timing?:unknown})?.stc_timing));
+    const payload = parsePayload(confirmed,selection,choice);
     const result = await applySelection(request,client,payload,undefined,context.get(requestTimingContext));
     if (!result.ok) return data({failed:true},{status:502,headers:result.headers});
     // Keep the shopper in this storefront. /checkout is Hydrogen's existing checkout route.
