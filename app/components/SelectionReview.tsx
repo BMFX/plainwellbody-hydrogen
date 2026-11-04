@@ -10,7 +10,7 @@ export function SelectionReview({selection, action, failed = false, pending = fa
     <h2 id="stc-popup-title" className="pw-h2 mt-4">{selection.name}</h2>
     <p className="mt-4">{t("stc.intro")}</p>
     {failed ? <div role="alert" className="border-line my-6 border p-4"><p>{t("stc.error")}</p><Link to="/cart" reloadDocument className="underline">{t("stc.review_bag")}</Link></div> : null}
-    <Form method="post" action={action} className="mt-10 max-w-[740px]" aria-busy={submitting}>
+    <Form method="post" action={action} reloadDocument className="mt-10 max-w-[740px]" aria-busy={submitting}>
       <input type="hidden" name="review_ticket" value={selection.ticket}/>
       {selection.recipe_token && <input type="hidden" name="recipe_token" value={selection.recipe_token}/>}
       <ul className="divide-line divide-y border-y border-line">
