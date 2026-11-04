@@ -45,3 +45,23 @@ Native shopper acceptance on `plainwellbody.com`:
 No checkout or order was submitted. Promotion applicability has automated coverage; live native discount/Function qualification, subscriptions and paid-order attribution remain separate work. Nine focused adapter tests and three runtime tests pass. TypeScript, gql.tada and build pass; the unrelated section-query external check was skipped because the toolkit was absent from this isolated checkout.
 
 After these passes, the operator enabled the exact Plainwell pilot connection's headless share URL at `https://plainwellbody.com`, while retaining `https://checkout.plainwellbody.com` as its native signed-proxy origin. Activation stores verification time/revision and emits `shopify.headless_storefront.activated` in application logs.
+
+## Cart write batching — November 3, 2026
+
+The adapter now creates a fresh visitor cart with its selection, line/cart attribution
+and requested promotion in one Storefront API mutation. It commits the Hydrogen
+cart cookie even if Shopify returns a partial created cart, so recovery can inspect
+that cart without repeating the add. Exact returned quantities and promotion
+applicability are checked before redirecting.
+
+For an existing bag, the cart identity, note and buyer details remain in place.
+The add succeeds before removal is allowed. Old-line removal, merged attributes
+and any promotion update then share one GraphQL request. GraphQL errors,
+user errors, warnings and lost/inapplicable promotions fail without an automatic
+retry. The existing same-origin and single-use review contract is unchanged.
+
+Validation: eleven adapter tests, three Node runtime tests, TypeScript,
+`hydrogen gql check --fail-on-warn`, and the production build pass. The Shopify
+AI Toolkit Hydrogen validator reports no UI components in this server helper;
+GraphQL validation is supplied by the project's pinned Hydrogen checker.
+Reference: [Hydrogen 2026-10 cart server handlers](https://shopify.dev/docs/api/hydrogen/2026-10/cart/cart-server-handlers).

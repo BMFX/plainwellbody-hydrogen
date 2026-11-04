@@ -3,12 +3,12 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {createRequire} from 'node:module';
 import ts from 'typescript';
-import {parseCartRequest} from '@shopify/hydrogen';
+import {parseCartRequest,createCartCookie} from '@shopify/hydrogen';
 const require=createRequire(import.meta.url);
 const source=readFileSync(new URL('../app/lib/sendthecart.server.ts',import.meta.url),'utf8');
 const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const exports={};
-new Function('require','exports',output)(name=>name==='@shopify/hydrogen'?{Cache:{none:()=>({})},gql:query=>query}:name==='./cart-handlers'?{cartHandlers:{}}:require(name),exports);
+new Function('require','exports',output)(name=>name==='@shopify/hydrogen'?{Cache:{none:()=>({})},gql:query=>query,createCartCookie}:name==='./cart-handlers'?{cartHandlers:{}}:require(name),exports);
 const {proxyUrl,proxyRequest,parseSelection,readChoice,parsePayload,applySelection,loadSelection,destination,requireSameOrigin}=exports;
 const env={PUBLIC_STORE_DOMAIN:'example.myshopify.com',PUBLIC_CHECKOUT_DOMAIN:'checkout.example.test'};
 const request=()=>new Request('https://example.test/a/cart/cedar?utm_source=email&admin_token=private&cartId=injected',{headers:{cookie:'cart=old; login=private',authorization:'secret'}});
@@ -16,13 +16,24 @@ const selection=()=>({ticket:'a'.repeat(64),name:'Cedar',reorder:false,behavior:
 const choice={review_ticket:'a'.repeat(64),optional_keys:[],sets:1,behavior:'retain_cart'};
 const payload=()=>({behavior:'retain_cart',items:[{platform_variant_id:'200',quantity:2}],attribution:{shopify:{line_item_properties:{_stc_execution:'e1'},cart_attributes:{stc_execution:'e1'}}}});
 const cart=()=>({id:'gid://shopify/Cart/old?key=private',totalQuantity:1,lines:{nodes:[{id:'old-line',quantity:1}]},attributes:[{key:'gift',value:'yes'}],discountCodes:[{code:'OLD',applicable:true}]});
-function handlers({addFails=false,attributesFail=false,incomplete=false}={}){
- const calls=[];const initial=cart();if(incomplete)initial.totalQuantity=3;
- return {calls,get:async({request})=>{assert.equal(new URL(request.url).search,'');return {data:{cart:initial}}},post:async({request})=>{
+function handlers({addFails=false,attributesFail=false,incomplete=false,empty=false,promotionAccepted=false,createFails=false}={}){
+ const calls=[],finish=[];const initial=cart();if(incomplete)initial.totalQuantity=3;
+ const client={graphql:async(document,{variables})=>{
+  finish.push(variables);
+  if(document.includes('mutation SendTheCartCreate')){
+   const created={id:'gid://shopify/Cart/new?key=private',totalQuantity:2,
+    lines:{nodes:[{merchandise:{id:'gid://shopify/ProductVariant/200'},quantity:2}]},
+    discountCodes:promotionAccepted?[{code:'NEW',applicable:true}]:[]};
+   return {data:{cartCreate:{cart:created,userErrors:createFails?[{code:'FAILED'}]:[],warnings:[]}}};
+  }
+  return {data:{removed:variables.remove?{cart:cart(),userErrors:[],warnings:[]}:null,
+    attributed:variables.attribute?{cart:cart(),userErrors:attributesFail?[{code:'FAILED'}]:[],warnings:[]}:null,
+    promoted:variables.promote?{cart:{...cart(),discountCodes:promotionAccepted?[{code:'OLD',applicable:true},{code:'NEW',applicable:true}]:[{code:'OLD',applicable:true}]},userErrors:[],warnings:[]}:null}};
+ }};
+ return {calls,finish,client,get:async({request})=>{assert.equal(new URL(request.url).search,'');return {data:{cart:empty?null:initial}}},post:async({request})=>{
   const body=await request.clone().json();calls.push(body);await parseCartRequest(request);
-  const add=body.lines?.some(line=>line.merchandiseId);
-  if((add&&addFails)||(body.attributes&&attributesFail))return {type:'error',headers:{},error:{}};
-  return {type:'json',headers:add?{'set-cookie':'cart=new; HttpOnly; Secure'}:{},data:{cart:cart(),userErrors:[],warnings:[]}};
+  if(addFails)return {type:'error',headers:{},error:{}};
+  return {type:'json',headers:{'set-cookie':'cart=new; HttpOnly; Secure'},data:{cart:cart(),userErrors:[],warnings:[]}};
  }};
 }
 test('upstream is fixed, redirects disallowed, and shopper secrets never leave Hydrogen',async()=>{
@@ -45,18 +56,18 @@ test('choices cannot forge optional products, reorder bounds or unavailable vari
  assert.throws(()=>parsePayload({...payload(),items:[{platform_variant_id:'999',quantity:2}]},selection(),choice));
 });
 test('keep adds once with line attribution and merges existing cart attributes',async()=>{
- const h=handlers();const result=await applySelection(request(),{},payload(),h);assert.equal(result.ok,true);assert.equal(h.calls.length,2);
+ const h=handlers();const result=await applySelection(request(),h.client,payload(),h);assert.equal(result.ok,true);assert.equal(h.calls.length,1);assert.equal(h.finish.length,1);
  assert.deepEqual(h.calls[0].lines,[{merchandiseId:'gid://shopify/ProductVariant/200',quantity:2,attributes:[{key:'_stc_execution',value:'e1'}]}]);
- assert.deepEqual(h.calls[1].attributes,[{key:'gift',value:'yes'},{key:'stc_execution',value:'e1'}]);
+ assert.deepEqual(h.finish[0].attributes,[{key:'gift',value:'yes'},{key:'stc_execution',value:'e1'}]);
 });
 test('replace adds before removing the original snapshot; failed adds never empty a bag',async()=>{
- const h=handlers();const result=await applySelection(request(),{},{...payload(),behavior:'clear_cart'},h);assert.equal(result.ok,true);
- assert.equal(h.calls[0].lines[0].merchandiseId,'gid://shopify/ProductVariant/200');assert.deepEqual(h.calls[1].lines,[{id:'old-line',quantity:0}]);
- const failed=handlers({addFails:true});assert.equal((await applySelection(request(),{},{...payload(),behavior:'clear_cart'},failed)).ok,false);assert.equal(failed.calls.length,1);
- const partial=handlers({incomplete:true});assert.equal((await applySelection(request(),{},{...payload(),behavior:'clear_cart'},partial)).ok,false);assert.equal(partial.calls.length,0);
+ const h=handlers();const result=await applySelection(request(),h.client,{...payload(),behavior:'clear_cart'},h);assert.equal(result.ok,true);
+ assert.equal(h.calls[0].lines[0].merchandiseId,'gid://shopify/ProductVariant/200');assert.deepEqual(h.finish[0].lineIds,['old-line']);assert.equal(h.finish[0].cartId,cart().id);assert.equal(h.finish.length,1);assert.equal(h.calls.length,1);
+ const failed=handlers({addFails:true});assert.equal((await applySelection(request(),failed.client,{...payload(),behavior:'clear_cart'},failed)).ok,false);assert.equal(failed.calls.length,1);assert.equal(failed.finish.length,0);
+ const partial=handlers({incomplete:true});assert.equal((await applySelection(request(),partial.client,{...payload(),behavior:'clear_cart'},partial)).ok,false);assert.equal(partial.calls.length,0);
 });
 test('later failures preserve cart cookies and never repeat the successful add',async()=>{
- const h=handlers({attributesFail:true});const result=await applySelection(request(),{},payload(),h);assert.equal(result.ok,false);assert.match(result.headers.get('set-cookie'),/cart=new/);assert.equal(h.calls.filter(call=>call.lines?.[0]?.merchandiseId).length,1);
+ const h=handlers({attributesFail:true});const result=await applySelection(request(),h.client,payload(),h);assert.equal(result.ok,false);assert.match(result.headers.get('set-cookie'),/cart=new/);assert.equal(h.calls.filter(call=>call.lines?.[0]?.merchandiseId).length,1);
 });
 
 test('cross-site cart submissions and unsafe custom redirects are rejected',()=>{
@@ -72,11 +83,23 @@ test('current Hydrogen publication, prices and subscription requirements overrid
   assert.equal(loaded.items[0].available,false);assert.equal(loaded.items[0].price,'20');assert.equal(loaded.items[1].available,false);
  }finally{globalThis.fetch=original;}
 });
-test('promotion application preserves existing codes and requires native applicability',async()=>{
- const rejected=handlers();const failed=await applySelection(request(),{},{...payload(),promotion:{code:'NEW'}},rejected);
- assert.equal(failed.ok,false);assert.deepEqual(rejected.calls.at(-1).discountCodes,['OLD','NEW']);
- const accepted=handlers();const original=accepted.post;
- // Read before the real parser consumes the request body.
- accepted.post=async(args)=>{const body=await args.request.clone().json();const result=await original(args);if(body.discountCodes)result.data.cart.discountCodes=[{code:'OLD',applicable:true},{code:'NEW',applicable:true}];return result;};
- assert.equal((await applySelection(request(),{},{...payload(),promotion:{code:'NEW'}},accepted)).ok,true);
+test('promotion application shares the completion request, preserves old codes and requires applicability',async()=>{
+ const rejected=handlers();const failed=await applySelection(request(),rejected.client,{...payload(),promotion:{code:'NEW'}},rejected);
+ assert.equal(failed.ok,false);assert.deepEqual(rejected.finish[0].discountCodes,['OLD','NEW']);
+ const accepted=handlers({promotionAccepted:true});
+ assert.equal((await applySelection(request(),accepted.client,{...payload(),promotion:{code:'NEW'}},accepted)).ok,true);
+ assert.equal(accepted.calls.length,1);assert.equal(accepted.finish.length,1);
+});
+test('a fresh cart combines products, attribution and promotion in one native mutation',async()=>{
+ const h=handlers({empty:true,promotionAccepted:true});
+ const result=await applySelection(request(),h.client,{...payload(),promotion:{code:'NEW'}},h);
+ assert.equal(result.ok,true);assert.equal(h.calls.length,0);assert.equal(h.finish.length,1);
+ assert.deepEqual(h.finish[0].input.discountCodes,['NEW']);
+ assert.deepEqual(h.finish[0].input.attributes,[{key:'stc_execution',value:'e1'}]);
+ assert.deepEqual(h.finish[0].input.lines[0].attributes,[{key:'_stc_execution',value:'e1'}]);
+ assert.match(result.headers.get('set-cookie'),/cart=/);
+});
+test('partial cart creation preserves its cookie for recovery and never retries',async()=>{
+ const h=handlers({empty:true,createFails:true});const result=await applySelection(request(),h.client,payload(),h);
+ assert.equal(result.ok,false);assert.equal(h.finish.length,1);assert.match(result.headers.get('set-cookie'),/cart=/);
 });
