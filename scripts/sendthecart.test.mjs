@@ -73,8 +73,8 @@ test('later failures preserve cart cookies and never repeat the successful add',
 test('cross-site cart submissions and unsafe custom redirects are rejected',()=>{
  for(const origin of [null,'https://attacker.test'])assert.throws(()=>requireSameOrigin(new Request('https://example.test/a/cart/cedar',{headers:origin?{origin}:{}})));
  requireSameOrigin(new Request('https://example.test/a/cart/cedar',{headers:{origin:'https://example.test'}}));
- for(const path of ['//evil.test','/a/cart/token','/api/cart','/pages/%2e%2e','/cart/add.js'])assert.equal(destination({redirect_mode:'custom',redirect_to:path}),'/cart?added=sendthecart');
- assert.equal(destination({redirect_mode:'custom',redirect_to:'/pages/thanks'}),'/pages/thanks');assert.equal(destination({redirect_mode:'checkout'}),'/checkout');
+ for(const path of ['//evil.test','/a/cart/token','/api/cart','/pages/%2e%2e','/cart/add.js'])assert.equal(destination({redirect_mode:'custom',redirect_to:path}),'/cart');
+ assert.equal(destination({redirect_mode:'custom',redirect_to:'/pages/thanks'}),'/pages/thanks');assert.equal(destination({redirect_mode:'checkout'}),'/checkout');assert.equal(destination({}),'/cart');
 });
 test('current Hydrogen publication, prices and subscription requirements override catalog availability',async()=>{
  const original=globalThis.fetch;globalThis.fetch=async()=>new Response(JSON.stringify({version:1,shop:env.PUBLIC_STORE_DOMAIN,review:selection()}),{headers:{'content-type':'application/json'}});

@@ -108,7 +108,7 @@ export function destination(payload: Pick<Payload,"redirect_mode" | "redirect_to
   if (payload.redirect_mode === "custom" && typeof path === "string" && path.length <= 255
     && /^\/(?:[A-Za-z0-9][A-Za-z0-9._~-]*(?:\/[A-Za-z0-9][A-Za-z0-9._~-]*)*\/?)?$/.test(path)
     && !/\/(?:a|apps|community|tools|api|s|c)(?:\/|$)|\/cart\/(?:add|change|clear|update)(?:[./]|$)/i.test(path)) return path;
-  return "/cart?added=sendthecart";
+  return "/cart";
 }
 
 const attributes = (values: Record<string, string> = {}) => Object.entries(values).map(([key,value]) => ({key,value:String(value)}));

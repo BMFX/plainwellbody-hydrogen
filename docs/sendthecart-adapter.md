@@ -65,3 +65,8 @@ Validation: eleven adapter tests, three Node runtime tests, TypeScript,
 AI Toolkit Hydrogen validator reports no UI components in this server helper;
 GraphQL validation is supplied by the project's pinned Hydrogen checker.
 Reference: [Hydrogen 2026-10 cart server handlers](https://shopify.dev/docs/api/hydrogen/2026-10/cart/cart-server-handlers).
+
+SendTheCart's full-document form redirect now uses `/cart` directly. The root
+loader already reads the newly committed cart cookie on that document request;
+the routine finder's `?added` client refresh flag would fetch the same cart again
+after hydration. Interactive routine-finder refresh behavior is left in place.
