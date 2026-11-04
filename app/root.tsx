@@ -14,6 +14,7 @@ import {
 import { CartAnalyticsTracker, PageViewedTracker } from "~/components/AnalyticsTrackers";
 import { AnnouncementBar } from "~/components/AnnouncementBar";
 import { CartDrawer } from "~/components/CartDrawer";
+import { SelectionPopup } from "~/components/SelectionPopup";
 import { Footer } from "~/components/Footer";
 import { ErrorPage } from "~/components/ErrorPage";
 import { Header } from "~/components/Header";
@@ -84,6 +85,10 @@ export const middleware: Route.MiddlewareFunction[] = [
     context.set(customerAccountContext, customerAccount?.customerAccount ?? null);
 
     const response = await next();
+    if (new URL(request.url).searchParams.has('stc_popup')) {
+      response.headers.set('Cache-Control', 'no-store');
+      response.headers.set('Referrer-Policy', 'no-referrer');
+    }
     const sessionHeaders = new Headers((await sessionManager.commit?.()) ?? undefined);
     for (const [name, value] of sessionHeaders) response.headers.append(name, value);
     if (response.status === 404) {
@@ -193,6 +198,7 @@ export default function App({ loaderData }: Route.ComponentProps) {
       <AnnouncementBar />
       <Header shopName={loaderData.shopInfo.name} />
       <Outlet />
+      <SelectionPopup />
       <Footer shopName={loaderData.shopInfo.name} />
       <CartDrawer />
       <SearchDrawer />

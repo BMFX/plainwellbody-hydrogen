@@ -217,3 +217,17 @@ test('automatic document is empty, uncached and posts one bound confirmation thr
  assert.equal((html.match(/\.submit\(\)/g)||[]).length,1);
  assert.throws(()=>handoff.automaticDocument(new Request('https://example.test/a/cart/cedar',{method:'POST'}),fixed,new Headers()));
 });
+
+const popup={};
+new Function('exports',ts.transpileModule(readFileSync(new URL('../app/lib/popup.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(popup);
+test('popup backgrounds default to home and reject external, recursive and mutation paths',()=>{
+ for(const path of [undefined,'','https://evil.test','//evil.test','/a/cart/demo','/api/cart','/cart/clear','/checkout','/pages/../cart','/pages/%2e%2e','/pages/refill?next=x'])assert.equal(popup.popupPath(path),'/');
+ assert.equal(popup.popupPath('/pages/refills'),'/pages/refills');
+ assert.equal(popup.popupPath('/collections/all'),'/collections/all');
+});
+test('popup routing preserves campaign attribution without copying arbitrary query data',()=>{
+ const target=new URL(popup.popupDestination('/pages/refills','cedar',new URL(request().url)),'https://example.test');
+ assert.equal(target.pathname,'/pages/refills');assert.equal(target.searchParams.get('stc_popup'),'cedar');assert.equal(target.searchParams.get('utm_source'),'email');
+ assert.equal(target.searchParams.has('cartId'),false);assert.equal(target.searchParams.has('admin_token'),false);
+ assert.equal(popup.popupToken('../other'),null);assert.equal(popup.popupToken('cedar-essentials-refill'),'cedar-essentials-refill');
+});

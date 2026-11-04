@@ -7,6 +7,7 @@ export default [
   route("cart", "routes/cart.tsx"),
   route("api/sendthecart/recipes/refresh", "routes/recipe-refresh.ts"),
   route("a/cart/:token", "routes/sendthecart.tsx"),
+  route("api/sendthecart/popup/:token", "routes/popup-selection.ts"),
   route("search", "routes/search.tsx"),
   route("pages/:handle", "routes/page.tsx"),
   route("policies/:handle", "routes/policy.tsx"),

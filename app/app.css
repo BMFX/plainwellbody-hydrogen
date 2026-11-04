@@ -397,3 +397,19 @@ body:has(.drawer-left[open]) {
     opacity: 0.6;
   }
 }
+/* Cart selections open over the chosen storefront page. */
+.stc-selection-popup {
+  margin: auto;
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 40px 28px 28px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--color-paper, #fff);
+  color: inherit;
+}
+.stc-selection-popup::backdrop { background: rgb(0 0 0 / .62); }
+.stc-popup-close { position: absolute; top: 8px; right: 12px; width: 36px; height: 36px; font-size: 28px; cursor: pointer; }
+.stc-selection-popup form { margin-top: 24px; }
