@@ -1,3 +1,6 @@
+import {useEffect, useRef} from "react";
+import {automaticFields, canApplyAutomatically} from "~/lib/automatic-selection";
+import type {Selection} from "~/lib/sendthecart.server";
 import { Form, Link, data, redirect, useNavigation } from "react-router";
 
 import {backendTimings, requestTimingContext} from "~/lib/request-timing";
@@ -47,11 +50,25 @@ export async function action({context,params,request}: Route.ActionArgs) {
     return data({failed:true},{status:409,headers:privateHeaders});
   }
 }
+function AutomaticSelection({selection}:{selection:Selection}) {
+  const form = useRef<HTMLFormElement>(null);
+  const submitted = useRef(false);
+  useEffect(() => {
+    if (!submitted.current && form.current) {
+      submitted.current = true;
+      form.current.submit();
+    }
+  }, []);
+  return <form ref={form} method="post" hidden>
+    {Object.entries(automaticFields(selection)).map(([name,value]) => <input key={name} type="hidden" name={name} value={value}/>)}
+  </form>;
+}
 export default function SendTheCartRoute({loaderData,actionData}: Route.ComponentProps) {
   const t = useText();
   const {selection} = loaderData;
   const pending = useNavigation().state !== "idle";
   const unavailable = selection.items.some(item => !item.optional && !item.available);
+  if (!actionData?.failed && canApplyAutomatically(selection)) return <AutomaticSelection selection={selection}/>;
   return <main id="main-content" className="pw-contain pw-gutter py-14" tabIndex={-1}>
     <p className="pw-eyebrow">{t("stc.title")}</p>
     <h1 className="pw-h1 mt-4">{selection.name}</h1>

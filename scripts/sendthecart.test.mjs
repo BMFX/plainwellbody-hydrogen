@@ -188,3 +188,32 @@ test('subscriptions, bundle children, unknown line types, duplicate variants and
  h.post=async()=>{adds++;return {type:'error',headers:{}};};
  assert.equal((await applySelection(request(),client,{...payload(),items:[...payload().items,...payload().items],behavior:'clear_cart'},h)).ok,false);assert.equal(adds,1);assert.equal(calls.length,0);
 });
+
+const automatic={};
+new Function('require','exports',ts.transpileModule(readFileSync(new URL('../app/lib/automatic-selection.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(require,automatic);
+const handoff={};
+new Function('require','exports',ts.transpileModule(readFileSync(new URL('../app/lib/automatic-selection.server.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(name=>name==='./automatic-selection'?automatic:require(name),handoff);
+test('only explicitly automatic, available fixed selections can bypass review',()=>{
+ const fixed={...selection(),review_required:false,items:[selection().items[0]]};
+ assert.equal(automatic.canApplyAutomatically(fixed),true);
+ for(const change of [{review_required:undefined},{review_required:true},{reorder:true},{items:[]},{items:selection().items},{items:[{...fixed.items[0],available:false}]}]){
+  assert.equal(automatic.canApplyAutomatically({...fixed,...change}),false);
+  assert.throws(()=>automatic.automaticFields({...fixed,...change}));
+ }
+ const parsed=parseSelection({version:1,shop:env.PUBLIC_STORE_DOMAIN,review:selection()},env.PUBLIC_STORE_DOMAIN);
+ assert.equal(parsed.review_required,true);
+ assert.throws(()=>parseSelection({version:1,shop:env.PUBLIC_STORE_DOMAIN,review:{...selection(),review_required:'false'}},env.PUBLIC_STORE_DOMAIN));
+});
+test('automatic document is empty, uncached and posts one bound confirmation through the existing same-origin action',async()=>{
+ const fixed={...selection(),review_required:false,items:[selection().items[0]],recipe_token:'proof"<&'};
+ const response=handoff.automaticDocument(new Request('https://example.test/a/cart/cedar?utm_source=email'),fixed,new Headers({'set-cookie':'preserved=value; Secure'}));
+ const html=await response.text();
+ assert.match(html,/<title><\/title>/);assert.match(html,/<form[^>]+method="post"[^>]+action="\/a\/cart\/cedar\?utm_source=email" hidden>/);
+ assert.match(html,/name="recipe_token" value="proof&quot;&lt;&amp;"/);
+ assert.equal(response.headers.get('cache-control'),'private, no-store');
+ assert.equal(response.headers.get('set-cookie'),'preserved=value; Secure');
+ assert.match(response.headers.get('content-security-policy'),/form-action 'self'/);
+ assert.doesNotMatch(html,/Preparing|stylesheet|<h1|<img|<button|_next/);
+ assert.equal((html.match(/\.submit\(\)/g)||[]).length,1);
+ assert.throws(()=>handoff.automaticDocument(new Request('https://example.test/a/cart/cedar',{method:'POST'}),fixed,new Headers()));
+});

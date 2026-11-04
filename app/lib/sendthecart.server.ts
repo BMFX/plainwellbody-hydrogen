@@ -8,7 +8,7 @@ import type { Env } from "./env";
 import type { RequestStorefrontClient } from "./storefront";
 
 export type SelectionItem = { key: string; title: string; quantity: number; optional: boolean; available: boolean; platform_variant_id: string; price: string | null; currency: string };
-export type Selection = { ticket: string; recipe_token?: string; name: string; reorder: boolean; behavior: "retain_cart" | "clear_cart"; items: SelectionItem[]; promotion?: {code:string} | null; redirect_mode?: string; redirect_to?: string };
+export type Selection = { review_required?: boolean; ticket: string; recipe_token?: string; name: string; reorder: boolean; behavior: "retain_cart" | "clear_cart"; items: SelectionItem[]; promotion?: {code:string} | null; redirect_mode?: string; redirect_to?: string };
 export type Choice = { review_ticket: string; recipe_token?: string; optional_keys: string[]; sets: number; behavior: "retain_cart" | "clear_cart" };
 type Payload = { behavior: Choice["behavior"]; items: {platform_variant_id: string; quantity: number}[]; attribution?: {shopify?: {line_item_properties?: Record<string,string>; cart_attributes?: Record<string,string>}}; promotion?: {code: string} | null; redirect_mode?: string; redirect_to?: string };
 const tokenPattern = /^(?:[a-z0-9]+(?:-[a-z0-9]+)*|[A-Za-z0-9]{40,128})$/;
@@ -55,7 +55,8 @@ export function parseSelection(value: unknown, shop: string | undefined): Select
     keys.add(item.key);
   }
   if (!review.items.some(item => !item.optional)) throw new Error("selection");
-  return review;
+  if (review.review_required !== undefined && typeof review.review_required !== "boolean") throw new Error("selection");
+  return {...review, review_required: review.review_required ?? true};
 }
 
 type NativeVariant = {id:string; availableForSale:boolean; price:{amount:string;currencyCode:string}; product:{requiresSellingPlan:boolean}};
