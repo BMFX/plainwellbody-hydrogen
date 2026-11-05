@@ -217,7 +217,7 @@ function checkPromotion(code: string | undefined, previous: {code:string;applica
 
 // No mutation is retried. Existing carts keep their identity, note and buyer details.
 export async function applySelection(request: Request, client: RequestStorefrontClient, payload: Payload, handlers = cartHandlers, timing = new RequestTiming()) {
-  const headers = new Headers({"Cache-Control":"no-store", "Referrer-Policy":"no-referrer"});
+  const headers = new Headers({"Cache-Control":"no-store", "Referrer-Policy":"same-origin"});
   try {
     // Never accept a cart id from shared-link query parameters.
     const cartRequest = new Request(new URL("/api/cart",request.url), {headers:{Cookie:request.headers.get("cookie") || ""}});

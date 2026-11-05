@@ -15,7 +15,7 @@ import { applySelection, destination, loadSelection, parsePayload, proxyRequest,
 import type { Route } from "./+types/sendthecart";
 
 export { RouteErrorBoundary as ErrorBoundary } from "~/components/ErrorPage";
-const privateHeaders = {"Cache-Control":"no-store", "Referrer-Policy":"no-referrer"};
+const privateHeaders = {"Cache-Control":"no-store", "Referrer-Policy":"same-origin"};
 export function meta({matches}: Route.MetaArgs) {
   return seoMeta(matches[0], {title:"",path:"/a/cart",noindex:true});
 }

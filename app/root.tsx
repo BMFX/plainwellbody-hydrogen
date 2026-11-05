@@ -87,7 +87,7 @@ export const middleware: Route.MiddlewareFunction[] = [
     const response = await next();
     if (new URL(request.url).searchParams.has('stc_popup')) {
       response.headers.set('Cache-Control', 'no-store');
-      response.headers.set('Referrer-Policy', 'no-referrer');
+      response.headers.set('Referrer-Policy', 'same-origin');
     }
     const sessionHeaders = new Headers((await sessionManager.commit?.()) ?? undefined);
     for (const [name, value] of sessionHeaders) response.headers.append(name, value);
