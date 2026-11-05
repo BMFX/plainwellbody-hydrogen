@@ -5,9 +5,10 @@ import { PublishedRecipeCache, recipeAttempt } from "./recipe-cache.server";
 import { cartHandlers } from "./cart-handlers";
 import { RequestTiming } from "./request-timing";
 import type { Env } from "./env";
+import type { Image } from "./content";
 import type { RequestStorefrontClient } from "./storefront";
 
-export type SelectionItem = { key: string; title: string; quantity: number; optional: boolean; available: boolean; platform_variant_id: string; price: string | null; currency: string };
+export type SelectionItem = { image?: Image | null; product_title?: string; variant_title?: string; key: string; title: string; quantity: number; optional: boolean; available: boolean; platform_variant_id: string; price: string | null; currency: string };
 export type Selection = { popup_path?: string; review_required?: boolean; ticket: string; recipe_token?: string; name: string; reorder: boolean; behavior: "retain_cart" | "clear_cart"; items: SelectionItem[]; promotion?: {code:string} | null; redirect_mode?: string; redirect_to?: string };
 export type Choice = { review_ticket: string; recipe_token?: string; optional_keys: string[]; sets: number; behavior: "retain_cart" | "clear_cart" };
 type Payload = { behavior: Choice["behavior"]; items: {platform_variant_id: string; quantity: number}[]; attribution?: {shopify?: {line_item_properties?: Record<string,string>; cart_attributes?: Record<string,string>}}; promotion?: {code: string} | null; redirect_mode?: string; redirect_to?: string };
@@ -59,13 +60,14 @@ export function parseSelection(value: unknown, shop: string | undefined): Select
   return {...review, review_required: review.review_required ?? true};
 }
 
-type NativeVariant = {id:string; availableForSale:boolean; price:{amount:string;currencyCode:string}; product:{requiresSellingPlan:boolean}};
+type NativeVariant = {id:string; title:string; image:Image|null; availableForSale:boolean; price:{amount:string;currencyCode:string}; product:{title:string; featuredImage:Image|null; requiresSellingPlan:boolean}};
 const VARIANTS = gql(`
   query SendTheCartVariants($ids: [ID!]!) {
     nodes(ids: $ids) {
       ... on ProductVariant {
-        id availableForSale price { amount currencyCode }
-        product { requiresSellingPlan }
+        id title availableForSale price { amount currencyCode }
+        image { url altText width height }
+        product { title requiresSellingPlan featuredImage { url altText width height } }
       }
     }
   }
@@ -79,7 +81,10 @@ export async function loadSelection(env: Env, token: string, request: Request, c
   return {...selection, items: selection.items.map(item => {
     const native = variants.get(`gid://shopify/ProductVariant/${item.platform_variant_id}`);
     return {...item, available: Boolean(native?.availableForSale && !native.product.requiresSellingPlan),
-      price: native?.price.amount ?? null, currency: native?.price.currencyCode ?? ""};
+      price: native?.price.amount ?? null, currency: native?.price.currencyCode ?? "",
+      image: native?.image ?? native?.product.featuredImage ?? null,
+      product_title: native?.product.title ?? item.title,
+      variant_title: native?.title && native.title !== "Default Title" ? native.title : ""};
   })};
 }
 

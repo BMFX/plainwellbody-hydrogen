@@ -231,3 +231,36 @@ test('popup routing preserves campaign attribution without copying arbitrary que
  assert.equal(target.searchParams.has('cartId'),false);assert.equal(target.searchParams.has('admin_token'),false);
  assert.equal(popup.popupToken('../other'),null);assert.equal(popup.popupToken('cedar-essentials-refill'),'cedar-essentials-refill');
 });
+
+test('selection imagery comes from current Shopify data, with product-image fallback',async()=>{
+ const original=globalThis.fetch;
+ const review=selection();review.items[0].image={url:'https://untrusted.example/fake.png'};
+ globalThis.fetch=async()=>new Response(JSON.stringify({version:1,shop:env.PUBLIC_STORE_DOMAIN,recipe:{valid_until:Math.floor(Date.now()/1000)+3600,recipe_token:'signed-image-proof',review:Object.fromEntries(Object.entries(review).filter(([key])=>key!=='ticket'))}}),{headers:{'content-type':'application/json'}});
+ const photo={url:'https://cdn.shopify.com/variant.png',altText:'Real variant',width:800,height:800};
+ const fallback={...photo,url:'https://cdn.shopify.com/product.png'};
+ try{
+  const loaded=await loadSelection(env,'cedar-images',request(),{graphql:async()=>({data:{nodes:[
+   {id:'gid://shopify/ProductVariant/200',title:'16 fl oz',availableForSale:true,price:{amount:'18',currencyCode:'USD'},image:photo,product:{title:'Wash',requiresSellingPlan:false,featuredImage:fallback}},
+   {id:'gid://shopify/ProductVariant/201',title:'Default Title',availableForSale:true,price:{amount:'12',currencyCode:'USD'},image:null,product:{title:'Balm',requiresSellingPlan:false,featuredImage:fallback}},
+  ]}})});
+  assert.deepEqual(loaded.items[0].image,photo);assert.equal(loaded.items[0].product_title,'Wash');assert.equal(loaded.items[0].variant_title,'16 fl oz');
+  assert.deepEqual(loaded.items[1].image,fallback);assert.equal(loaded.items[1].variant_title,'');
+  const missing=await loadSelection(env,'cedar-images',request(),{graphql:async()=>({data:{nodes:[]}})});
+  assert.equal(missing.items[0].image,null);assert.equal(missing.items[0].available,false);
+ }finally{globalThis.fetch=original;}
+});
+
+test('selection estimates respect optional choices, set multipliers, currency precision and incomplete prices',()=>{
+ const summaryExports={};
+ new Function('exports',ts.transpileModule(readFileSync(new URL('../app/lib/selection-summary.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(summaryExports);
+ const summarize=summaryExports.selectionSummary;
+ const items=selection().items;
+ assert.deepEqual(summarize(items,[],1),{count:2,total:'$36.00'});
+ assert.deepEqual(summarize(items,['1'],2),{count:6,total:'$96.00'});
+ assert.equal(summarize([{...items[0],quantity:3,price:'0.10'}],[],1).total,'$0.30');
+ assert.equal(summarize([{...items[0],currency:'JPY',price:'100'}],[],2).total,'¥400');
+ for(const price of [null,'','not-a-price','-1'])assert.equal(summarize([{...items[0],price}],[],1).total,null);
+ assert.equal(summarize([items[0],{...items[1],currency:'EUR'}],['1'],1).total,null);
+ assert.equal(summarize([{...items[0],available:false}],[],1).total,null);
+ for(const sets of [0,1.5,11])assert.equal(summarize(items,[],sets).total,null);
+});

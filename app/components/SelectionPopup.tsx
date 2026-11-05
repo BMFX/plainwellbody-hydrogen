@@ -57,7 +57,7 @@ function Popup({token}: {token:string}) {
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) close();
     }}}>
     <button type="button" className="stc-popup-close" aria-label={t('nav.close')} onClick={close}>×</button>
-    {selection ? <SelectionReview selection={selection} action={action}/> : <div role={failed ? 'alert' : 'status'} aria-busy={!failed}>
+    {selection ? <SelectionReview selection={selection} action={action}/> : <div className="stc-popup-loading" role={failed ? 'alert' : 'status'} aria-busy={!failed}>
       <h2 id="stc-popup-title" className="pw-h2">{t('stc.title')}</h2>
       {failed ? <p className="mt-4">{t('stc.unavailable')}</p> : <span aria-hidden="true" className="mt-4 block">…</span>}
     </div>}
